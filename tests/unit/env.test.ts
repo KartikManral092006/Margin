@@ -48,6 +48,20 @@ describe("parseServerEnv", () => {
   });
 });
 
+describe("Nexconn settings", () => {
+  it("defaults NEXCONN_AREA to SG and rejects unknown areas", () => {
+    expect(parseServerEnv(valid).NEXCONN_AREA).toBe("SG");
+    expect(() => parseServerEnv({ ...valid, NEXCONN_AREA: "XX" })).toThrow(/NEXCONN_AREA/);
+  });
+
+  it("only accepts 0 or 1 for NEXCONN_DEV_ROUTES", () => {
+    expect(parseServerEnv({ ...valid, NEXCONN_DEV_ROUTES: "1" }).NEXCONN_DEV_ROUTES).toBe("1");
+    expect(() => parseServerEnv({ ...valid, NEXCONN_DEV_ROUTES: "yes" })).toThrow(
+      /NEXCONN_DEV_ROUTES/,
+    );
+  });
+});
+
 describe("clientEnvSchema", () => {
   it("only exposes public variables", () => {
     const parsed = clientEnvSchema.parse({ ...valid, NEXCONN_APP_SECRET: "secret" });

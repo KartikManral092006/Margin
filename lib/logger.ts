@@ -6,7 +6,16 @@ export const logger = pino({
   level: env.LOG_LEVEL,
   base: { service: "margin" },
   redact: {
-    paths: ["req.headers.authorization", "req.headers.cookie", "*.token", "*.secret"],
+    paths: [
+      "req.headers.authorization",
+      "req.headers.cookie",
+      "req.headers.signature",
+      "*.token",
+      "*.secret",
+      "*.accessToken",
+      "*.appSecret",
+      "*.signature",
+    ],
     censor: "[redacted]",
   },
 });

@@ -16,6 +16,8 @@ export const serverEnvSchema = z.object({
   EMAIL_FROM: optional(z.email()),
   NEXCONN_APP_KEY: optional(z.string().min(1)),
   NEXCONN_APP_SECRET: optional(z.string().min(1)),
+  NEXCONN_AREA: z.enum(["SG", "NA", "SA"]).default("SG"),
+  NEXCONN_DEV_ROUTES: optional(z.enum(["0", "1"])),
   AI_API_KEY: optional(z.string().min(1)),
 });
 
