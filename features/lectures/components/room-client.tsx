@@ -9,7 +9,9 @@ import { YouTubePlayer } from "@/features/player/components/youtube-player";
 import { formatClock } from "@/features/player/shared/format";
 import type { LectureSummary } from "@/features/lectures/shared/schemas";
 import { canonicalWatchUrl } from "@/features/lectures/shared/youtube";
+import { useRoomMoments } from "@/features/moments/client/use-room-moments";
 import { MomentsPanel } from "@/features/moments/components/moments-panel";
+import { TimelineMarkers } from "@/features/moments/components/timeline-markers";
 
 type RoomContextValue = { lecture: LectureSummary; store: PlayerTimeStore };
 
@@ -51,6 +53,7 @@ export function RoomClient({
   startSec: number | null;
 }) {
   const [store] = useState(() => createPlayerTimeStore());
+  const moments = useRoomMoments(lecture.id, store);
   const [memberCount, setMemberCount] = useState(lecture.memberCount);
   const [joinState, setJoinState] = useState<JoinState>("joining");
   const [playerError, setPlayerError] = useState<number | null>(null);
@@ -136,6 +139,8 @@ export function RoomClient({
           />
         )}
 
+        <TimelineMarkers markers={moments.markers} store={store} />
+
         <section className="flex flex-col gap-3 px-4 sm:px-0">
           <div className="space-y-1">
             <h1 className="line-clamp-2 text-lg font-semibold text-balance sm:text-xl">
@@ -177,7 +182,7 @@ export function RoomClient({
         </section>
 
         <div className="px-4 sm:px-0">
-          <MomentsPanel lectureId={lecture.id} store={store} />
+          <MomentsPanel moments={moments} store={store} />
         </div>
       </main>
     </RoomContext.Provider>

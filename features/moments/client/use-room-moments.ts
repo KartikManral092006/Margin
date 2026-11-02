@@ -16,6 +16,14 @@ import {
 
 const POLL_MS = 5000;
 const LIVE_REFRESH_MS = 30_000;
+const REFRESH_DEBOUNCE_MS = 150;
+const MARKERS_DEBOUNCE_MS = 1500;
+const JSON_HEADERS = { "content-type": "application/json" };
+const CHAT_ATTEMPTS = 4;
+
+type ChatReply = { chat?: string; channelId?: string };
+
+export type Markers = { bucketSec: number; buckets: { tSec: number; count: number }[] };
 
 export type LiveStatus = "connecting" | "live" | "polling";
 
@@ -48,11 +56,35 @@ async function fetchWindow(
   }
 }
 
+async function fetchMarkers(lectureId: string): Promise<Markers | null> {
+  try {
+    return await getJson<Markers>(`/api/lectures/${lectureId}/moments/markers`);
+  } catch {
+    return null;
+  }
+}
+
+async function sendJson(url: string, method: string, body: unknown = {}) {
+  const response = await fetch(url, { method, headers: JSON_HEADERS, body: JSON.stringify(body) });
+  const json = (await response.json().catch(() => null)) as {
+    moment?: MomentView;
+    error?: string;
+  } | null;
+  return { response, json };
+}
+
 export function useRoomMoments(lectureId: string, store: PlayerTimeStore) {
   const [state, dispatch] = useReducer(momentsReducer, EMPTY_MOMENTS);
   const [status, setStatus] = useState<LiveStatus>("connecting");
   const [loadError, setLoadError] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [markers, setMarkers] = useState<Markers | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  // The live handler runs outside React's render, so it reads the latest items from a ref.
+  const itemsRef = useRef(state.items);
+  useEffect(() => {
+    itemsRef.current = state.items;
+  }, [state.items]);
   const step = usePlayer(store, (s) => Math.floor(s.tSec / WINDOW_STEP_SEC));
   const windowRef = useRef(windowFor(0));
   const base = `/api/lectures/${lectureId}/moments`;
@@ -96,9 +128,27 @@ export function useRoomMoments(lectureId: string, store: PlayerTimeStore) {
 
   // Live signal: join the room's Nexconn group and connect. Each MG:Moment from marginbot
   // carries the whole doubt, so it is shown at once (momentFromSignal drops anything else).
+  // A metadata update (votes, status) only says "this moment changed": we re-read it from
+  // our API, because metadata doesn't prove who set it.
   useEffect(() => {
     let cancelled = false;
     let channelId: string | null = null;
+    const stale = new Set<string>();
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const refreshStale = () => {
+      refreshTimer = null;
+      const ids = [...stale].slice(0, 20);
+      ids.forEach((id) => stale.delete(id));
+      if (ids.length > 0) {
+        getJson<{ moments: MomentView[] }>(`${base}?ids=${ids.join(",")}`)
+          .then((body) => {
+            if (!cancelled) dispatch({ type: "merge", moments: body.moments, at: Date.now() });
+          })
+          .catch(() => {});
+      }
+      if (stale.size > 0) refreshTimer = setTimeout(refreshStale, REFRESH_DEBOUNCE_MS);
+    };
 
     const unsubscribe = nexconnEvents.subscribe((event) => {
       if (event.kind === "connection") {
@@ -108,23 +158,37 @@ export function useRoomMoments(lectureId: string, store: PlayerTimeStore) {
         if (connected) void loadWindow();
         return;
       }
-      if (event.kind !== "message" || channelId === null) return;
+      if (channelId === null) return;
+      if (event.kind === "metadataUpdated") {
+        const data = event.data as { messageId?: string; channelId?: string };
+        if (data.channelId !== channelId || !data.messageId) return;
+        const item = itemsRef.current.find((i) => i.nexconnMessageId === data.messageId);
+        if (!item) return;
+        stale.add(item.id);
+        refreshTimer ??= setTimeout(refreshStale, REFRESH_DEBOUNCE_MS);
+        return;
+      }
+      if (event.kind !== "message") return;
       const moment = momentFromSignal(event.data as IncomingMessage, { lectureId, channelId });
-      if (moment) dispatch({ type: "merge", moments: [moment], at: Date.now() });
+      if (moment) dispatch({ type: "incoming", moment, at: Date.now() });
     });
 
     (async () => {
       try {
-        const response = await fetch(`/api/lectures/${lectureId}/chat`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: "{}",
-        });
-        const body = (await response.json().catch(() => null)) as {
-          chat?: string;
-          channelId?: string;
-        } | null;
-        if (!response.ok || body?.chat !== "ok" || !body.channelId) throw new Error("no chat");
+        // A 503 is often temporary (Nexconn slow, or another student creating this room's
+        // group right now): retry a few times with backoff before settling for polling.
+        let body = null as ChatReply | null;
+        for (let attempt = 0; attempt < CHAT_ATTEMPTS && !cancelled; attempt++) {
+          if (attempt > 0) await new Promise((r) => setTimeout(r, 1000 * 2 ** (attempt - 1)));
+          const response = await fetch(`/api/lectures/${lectureId}/chat`, {
+            method: "POST",
+            headers: JSON_HEADERS,
+            body: "{}",
+          });
+          body = (await response.json().catch(() => null)) as ChatReply | null;
+          if (response.ok || response.status !== 503) break;
+        }
+        if (body?.chat !== "ok" || !body.channelId) throw new Error("no chat");
         channelId = body.channelId;
         await startNexconn({ withChatUI: false });
         if (!cancelled) setStatus("live");
@@ -136,8 +200,27 @@ export function useRoomMoments(lectureId: string, store: PlayerTimeStore) {
     return () => {
       cancelled = true;
       unsubscribe();
+      if (refreshTimer) clearTimeout(refreshTimer);
     };
-  }, [lectureId, loadWindow]);
+  }, [lectureId, base, loadWindow]);
+
+  // Markers for the whole lecture: on load, then shortly after the number of doubts changes.
+  const topLevelCount = state.items.filter((i) => i.parentId === null && i.local === null).length;
+  useEffect(() => {
+    let cancelled = false;
+    const timer = setTimeout(
+      () => {
+        fetchMarkers(lectureId).then((result) => {
+          if (!cancelled && result) setMarkers(result);
+        });
+      },
+      topLevelCount === 0 ? 0 : MARKERS_DEBOUNCE_MS,
+    );
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [lectureId, topLevelCount]);
 
   // Without the live signal, refresh the window every few seconds. While live, a slow refresh
   // still runs, so a doubt whose signal failed (and wasn't resent yet) shows up eventually.
@@ -152,17 +235,14 @@ export function useRoomMoments(lectureId: string, store: PlayerTimeStore) {
   }, [status, loadWindow]);
 
   const post = useCallback(
-    async (clientId: string, body: string, tSec: number) => {
+    async (clientId: string, body: string, tSec: number, parentId: string | null) => {
       try {
-        const response = await fetch(base, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ clientId, body, tSec }),
+        const { response, json } = await sendJson(base, "POST", {
+          clientId,
+          body,
+          tSec,
+          parentId,
         });
-        const json = (await response.json().catch(() => null)) as {
-          moment?: MomentView;
-          error?: string;
-        } | null;
         if (response.ok && json?.moment) {
           dispatch({ type: "confirmed", clientId, moment: json.moment, at: Date.now() });
           return;
@@ -178,7 +258,7 @@ export function useRoomMoments(lectureId: string, store: PlayerTimeStore) {
   );
 
   const submit = useCallback(
-    (body: string, tSec: number) => {
+    (body: string, tSec: number, parentId: string | null = null) => {
       const clientId = newClientId();
       dispatch({
         type: "optimistic",
@@ -187,18 +267,20 @@ export function useRoomMoments(lectureId: string, store: PlayerTimeStore) {
           lectureId,
           tSec: Math.floor(tSec),
           body,
-          parentId: null,
+          parentId,
           status: "open",
           upvotes: 0,
           pinned: false,
           authorName: "You",
           mine: true,
           clientId,
+          votedByMe: false,
+          nexconnMessageId: null,
           createdAt: new Date().toISOString(),
         },
         at: Date.now(),
       });
-      void post(clientId, body, tSec);
+      void post(clientId, body, tSec, parentId);
     },
     [lectureId, post],
   );
@@ -208,10 +290,54 @@ export function useRoomMoments(lectureId: string, store: PlayerTimeStore) {
       const item = state.items.find((candidate) => candidate.key === clientId);
       if (!item) return;
       dispatch({ type: "retrying", clientId });
-      void post(clientId, item.body, item.tSec);
+      void post(clientId, item.body, item.tSec, item.parentId);
     },
     [state.items, post],
   );
 
-  return { items: state.items, status, loaded, loadError, submit, retry, reload: loadWindow };
+  // Optimistic; the API's answer settles the real count, a refusal reverts it.
+  const vote = useCallback(async (id: string, on: boolean) => {
+    dispatch({ type: "vote", id, on });
+    try {
+      const { response, json } = await sendJson(`/api/moments/${id}/vote`, on ? "POST" : "DELETE");
+      if (response.ok && json?.moment) {
+        dispatch({ type: "merge", moments: [json.moment], at: Date.now() });
+        return;
+      }
+      throw new Error(json?.error ?? "vote failed");
+    } catch {
+      dispatch({ type: "vote", id, on: !on });
+      setNotice("Couldn't save your vote. Try again.");
+    }
+  }, []);
+
+  const resolve = useCallback(async (id: string, resolved: boolean) => {
+    dispatch({ type: "status", id, status: resolved ? "resolved" : "open" });
+    try {
+      const { response, json } = await sendJson(`/api/moments/${id}/resolve`, "POST", { resolved });
+      if (response.ok && json?.moment) {
+        dispatch({ type: "merge", moments: [json.moment], at: Date.now() });
+        return;
+      }
+      throw new Error(json?.error ?? "resolve failed");
+    } catch {
+      dispatch({ type: "status", id, status: resolved ? "open" : "resolved" });
+      setNotice("Couldn't update the doubt. Try again.");
+    }
+  }, []);
+
+  return {
+    items: state.items,
+    status,
+    loaded,
+    loadError,
+    markers,
+    notice,
+    clearNotice: () => setNotice(null),
+    submit,
+    retry,
+    vote,
+    resolve,
+    reload: loadWindow,
+  };
 }

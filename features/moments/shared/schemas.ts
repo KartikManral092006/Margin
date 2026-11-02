@@ -72,5 +72,8 @@ export type MomentView = {
   mine: boolean;
   // Lets the author's browser match its optimistic copy (a random per-doubt token).
   clientId: string | null;
+  votedByMe: boolean;
+  // The live MG:Moment's message id: metadata updates (votes, status) arrive keyed by it.
+  nexconnMessageId: string | null;
   createdAt: string;
 };

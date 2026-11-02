@@ -110,7 +110,7 @@ describe.skipIf(!safe)("moments (Postgres)", () => {
     ] as const) {
       await post({ clientId, tSec });
     }
-    const rows = await listMomentsInWindow(db, lectureId, 90, 900);
+    const rows = await listMomentsInWindow(db, lectureId, 90, 900, userId);
     const secs = rows.map((r) => r.tSec);
     expect(secs).toEqual([...secs].sort((x, y) => x - y));
     expect(secs).toContain(100);

@@ -9,10 +9,13 @@ export type PlayerSnapshot = Readonly<{
   rate: number;
   state: PlayerState;
   ready: boolean;
+  // Seconds, once YouTube knows it (0 from getDuration means "not yet").
+  duration: number | null;
 }>;
 
 export type PlayerAdapter = {
   getCurrentTime(): number;
+  getDuration(): number;
   getPlaybackRate(): number;
   getAvailablePlaybackRates(): number[];
   setPlaybackRate(rate: number): void;
@@ -44,12 +47,17 @@ export type PlayerTimeStore = {
 };
 
 export const POLL_MS = 250;
+// While paused or not started, a slower poll still notices YouTube's own seek bar being dragged.
+export const IDLE_POLL_MS = 1000;
+// Right after a seek YouTube can still report the old time for a moment; trust the target.
+export const SEEK_SETTLE_MS = 2000;
 
 export const INITIAL_SNAPSHOT: PlayerSnapshot = Object.freeze({
   tSec: 0,
   rate: 1,
   state: "unstarted",
   ready: false,
+  duration: null,
 });
 
 const STATE_BY_CODE: Record<number, PlayerState> = {
@@ -79,11 +87,16 @@ const realScheduler: Scheduler = {
   clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
 };
 
-export function createPlayerTimeStore(scheduler: Scheduler = realScheduler): PlayerTimeStore {
+export function createPlayerTimeStore(
+  scheduler: Scheduler = realScheduler,
+  now: () => number = Date.now,
+): PlayerTimeStore {
   const listeners = new Set<() => void>();
   let snapshot: PlayerSnapshot = INITIAL_SNAPSHOT;
   let player: PlayerAdapter | null = null;
   let timer: unknown = null;
+  let timerMs = 0;
+  let lastSeek: { target: number; at: number } | null = null;
   // A seek requested before the player is ready (e.g. Day 6 click-to-seek), applied on attach.
   let pendingSeek: number | null = null;
 
@@ -94,7 +107,8 @@ export function createPlayerTimeStore(scheduler: Scheduler = realScheduler): Pla
       merged.tSec === snapshot.tSec &&
       merged.rate === snapshot.rate &&
       merged.state === snapshot.state &&
-      merged.ready === snapshot.ready
+      merged.ready === snapshot.ready &&
+      merged.duration === snapshot.duration
     ) {
       return;
     }
@@ -102,18 +116,33 @@ export function createPlayerTimeStore(scheduler: Scheduler = realScheduler): Pla
     for (const listener of listeners) listener();
   }
 
-  function poll() {
-    if (player) update({ tSec: Math.max(0, player.getCurrentTime()) });
+  function readDuration(source: PlayerAdapter): number | null {
+    const value = source.getDuration();
+    return Number.isFinite(value) && value > 0 ? value : null;
   }
 
-  // Polls only while playing and watched, so a paused room costs nothing.
+  function poll() {
+    if (!player) return;
+    let tSec = Math.max(0, player.getCurrentTime());
+    if (lastSeek) {
+      const settling = now() - lastSeek.at < SEEK_SETTLE_MS;
+      if (settling && Math.abs(tSec - lastSeek.target) > 2) tSec = lastSeek.target;
+      if (!settling) lastSeek = null;
+    }
+    update({ tSec, duration: snapshot.duration ?? readDuration(player) });
+  }
+
+  // Polls only while watched: every 250 ms while playing, every second otherwise.
   function syncTimer() {
-    const shouldRun = player !== null && listeners.size > 0 && snapshot.state === "playing";
-    if (shouldRun && timer === null) {
-      timer = scheduler.setInterval(poll, POLL_MS);
-    } else if (!shouldRun && timer !== null) {
+    const shouldRun = player !== null && listeners.size > 0;
+    const wantedMs = snapshot.state === "playing" ? POLL_MS : IDLE_POLL_MS;
+    if (timer !== null && (!shouldRun || timerMs !== wantedMs)) {
       scheduler.clearInterval(timer);
       timer = null;
+    }
+    if (shouldRun && timer === null) {
+      timer = scheduler.setInterval(poll, wantedMs);
+      timerMs = wantedMs;
     }
   }
 
@@ -133,6 +162,7 @@ export function createPlayerTimeStore(scheduler: Scheduler = realScheduler): Pla
       const target = Math.max(0, seconds);
       if (player) player.seekTo(target, true);
       else pendingSeek = target;
+      lastSeek = { target, at: now() };
       update({ tSec: target });
     },
     play: () => player?.playVideo(),
@@ -146,10 +176,14 @@ export function createPlayerTimeStore(scheduler: Scheduler = realScheduler): Pla
       player = next;
       const seekTo = pendingSeek;
       pendingSeek = null;
-      if (seekTo !== null) next.seekTo(seekTo, true);
+      if (seekTo !== null) {
+        next.seekTo(seekTo, true);
+        lastSeek = { target: seekTo, at: now() };
+      }
       update({
         ready: true,
         tSec: seekTo ?? Math.max(0, next.getCurrentTime()),
+        duration: readDuration(next),
         rate: next.getPlaybackRate(),
         state: playerStateFromCode(next.getPlayerState()),
       });
@@ -158,6 +192,7 @@ export function createPlayerTimeStore(scheduler: Scheduler = realScheduler): Pla
     detach() {
       player = null;
       pendingSeek = null;
+      lastSeek = null;
       syncTimer();
       update(INITIAL_SNAPSHOT);
     },

@@ -22,6 +22,8 @@ function view(overrides: Partial<MomentView> = {}): MomentView {
     authorName: "Ana",
     mine: false,
     clientId: null,
+    votedByMe: false,
+    nexconnMessageId: null,
     createdAt: "2026-11-02T10:00:00.000Z",
     ...overrides,
   };
@@ -176,6 +178,66 @@ describe("momentsReducer", () => {
       at: 11,
     });
     expect(state.items.map((item) => item.key).sort()).toEqual(["c9", "outside"]);
+  });
+});
+
+describe("live signals and optimistic actions", () => {
+  const confirmed = (overrides: Partial<MomentView> = {}) =>
+    momentsReducer(EMPTY_MOMENTS, {
+      type: "merge",
+      moments: [view({ id: "m1", upvotes: 4, votedByMe: true, ...overrides })],
+      at: 1,
+    });
+
+  it("a resent live signal never overwrites the vote count from the API", () => {
+    const state = momentsReducer(confirmed(), {
+      type: "incoming",
+      moment: view({ id: "m1", upvotes: 0, votedByMe: false }),
+      at: 2,
+    });
+    expect(state.items[0]).toMatchObject({ upvotes: 4, votedByMe: true });
+  });
+
+  it("a live signal adds a doubt this browser doesn't have", () => {
+    const state = momentsReducer(EMPTY_MOMENTS, { type: "incoming", moment: view(), at: 1 });
+    expect(state.items).toHaveLength(1);
+  });
+
+  it("a live signal replaces my own optimistic copy", () => {
+    const state = momentsReducer(optimistic("c1"), {
+      type: "incoming",
+      moment: view({ id: "srv1", tSec: 30, clientId: "c1" }),
+      at: 2,
+    });
+    expect(state.items.map((item) => [item.key, item.local, item.mine])).toEqual([
+      ["srv1", null, true],
+    ]);
+  });
+
+  it("an optimistic vote changes the count once and can be undone", () => {
+    let state = confirmed({ upvotes: 2, votedByMe: false });
+    state = momentsReducer(state, { type: "vote", id: "m1", on: true });
+    expect(state.items[0]).toMatchObject({ upvotes: 3, votedByMe: true });
+    const same = momentsReducer(state, { type: "vote", id: "m1", on: true });
+    expect(same).toBe(state); // already voted: nothing changes
+    state = momentsReducer(state, { type: "vote", id: "m1", on: false });
+    expect(state.items[0]).toMatchObject({ upvotes: 2, votedByMe: false });
+  });
+
+  it("never shows a negative count", () => {
+    const state = momentsReducer(confirmed({ upvotes: 0, votedByMe: true }), {
+      type: "vote",
+      id: "m1",
+      on: false,
+    });
+    expect(state.items[0]?.upvotes).toBe(0);
+  });
+
+  it("marks a doubt resolved and open again", () => {
+    let state = momentsReducer(confirmed(), { type: "status", id: "m1", status: "resolved" });
+    expect(state.items[0]?.status).toBe("resolved");
+    state = momentsReducer(state, { type: "status", id: "m1", status: "open" });
+    expect(state.items[0]?.status).toBe("open");
   });
 });
 

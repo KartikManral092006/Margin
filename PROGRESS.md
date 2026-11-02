@@ -11,6 +11,7 @@ Read this first at the start of every session. Update it at the end of every day
 | 3   | Mon Nov 2 | Auth         | Done locally (built a day early); Google and email need your keys |
 | 4   | Mon Nov 2 | Rooms        | Done (built two days early); review fixes applied                 |
 | 5   | Mon Nov 2 | Moments      | Done (built three days early); live Nexconn delivery 0.8-0.9 s    |
+| 6   | Mon Nov 2 | Threads      | Done (built four days early); jump to 30:00 loads in 130 ms       |
 
 ## Nexconn plan and remaining risks (updated Nov 2)
 
@@ -166,8 +167,26 @@ Verified: format, lint, typecheck, 344 unit tests, 8 integration tests (10 concu
 
 Not done:
 
-1. Clicking a doubt's time before the video has started showed 0:00 in two headless runs (0:55 in another); investigate with Day 6's click-to-seek.
+1. Clicking a doubt's time before the video started showed 0:00 in headless runs: fixed on Day 6 (seek settling).
 2. The Nexconn group `lec…` created for the deleted test room still exists in Nexconn (harmless).
+
+## Day 6: threads, votes, resolve, markers (built Nov 2)
+
+Done:
+
+- Migration `0005_votes`: `votes` (one row per person per moment). `Moment.upvotes` changes only in the same transaction as the Vote row, so double clicks and races can't drift it. No votes on your own doubt; a vote can be taken back.
+- `POST`/`DELETE /api/moments/[id]/vote`, `POST /api/moments/[id]/resolve` (`{resolved}`; only the asker, top-level only; Day 10 adds answerers and hosts), `GET /api/lectures/[id]/moments/markers` (top-level doubts in 15-second buckets for the whole lecture). Acting on a moment joins the room.
+- Replies: `parentId` one level deep; the server stores a reply at its parent's second whatever the client sends.
+- Live updates: after a vote or status change the server sets the counts as **Nexconn message metadata** on the moment's `MG:Moment` (the Day 2 G3 mechanism). Browsers treat it as "this moment changed" and re-read it from our API (metadata can't prove who set it). Live `MG:Moment` signals only add doubts a browser doesn't have; they never overwrite fuller API data (a resent signal used to reset counts to 0).
+- UI: "▲ n · Me too" button (optimistic, reverted on refusal), Reply thread with its own composer, "Mark resolved"/"Reopen" for the asker and a Resolved badge, and a markers bar under the player (never over it) whose markers seek on click. The time store holds a seek target for 2 s (YouTube briefly reports the old time) and polls every second while paused (dragging YouTube's own seek bar reloads the right window).
+- Fixes found in live testing: two people opening a brand-new room together made the second `/chat` fail ("busy") and that browser never went live; the server now waits up to 4 s for the other request to create the group and the browser retries 503s with backoff. Signals skipped before a room had its group are now resent up to 20 at a time (it was 3).
+
+Verified: format, lint, typecheck, 355 unit tests, 15 integration tests (6 concurrent votes from 3 people give 3; unvote once; own-vote and cross-lecture refusals; resolve permissions; reply time; marker buckets), drift 0, production build and secret scan clean. API: every rule above returned the expected status. **Done when, in two headless browsers at 375 px:** B opens the room at 0:00 and sees only the 0:45 doubt; clicking the 30:00 marker loads the 29:55, 30:02 and 30:30 doubts in **130 ms** and the clock shows 30:00. Live over Nexconn (devalice/devbob identities again, no new Nexconn users; 3 groups created in total): a new doubt arrives in 0.33-0.47 s, an upvote shows for the asker in 1.0-1.3 s, a reply in 0.8-0.9 s, Resolved in 2.5-4.1 s (an extra API read plus Nexconn latency from this network). Going live takes 7-17 s here; until then the room polls every 5 s.
+
+Not done:
+
+1. Subagents stalled all day (three probes hit the 600 s watchdog), so Days 5 and 6 had no independent review. Run one when they work.
+2. Test rooms' Nexconn groups (3) remain in Nexconn (harmless).
 
 ## Decisions (do not re-litigate without a reason)
 
@@ -195,6 +214,7 @@ Not done:
 - Rooms work from Postgres alone. Nexconn group create and join happen lazily in `POST /api/lectures/[id]/chat`, never on page view or join. A public room's creator is a `member`; `host` is for private class rooms (deferred, with Course/Unit/CourseMembership).
 - With streaming metadata, a page-level `redirect()`/`notFound()` returns HTTP 200 and acts in client JS for normal browsers (curl gets a real 307/404). Redirects that must work without JS live in `proxy.ts`, route handlers or server actions.
 - Dev reload loop (Nov 2): every page reloaded itself continuously. Fixed by deleting `.next` and restoring iCloud-evicted files; don't share `.next` between `pnpm build` and `pnpm dev` runs.
+- Votes and status changes go out as message metadata on the moment's MG:Moment; clients re-read the moment from the API. Live signals never overwrite API data.
 - Room moments are sent by marginbot, never by the author, and clients ignore `MG:Moment` from anyone else. Postgres is the truth; the signal is for speed.
 - The working copy is `~/code/Margin` (outside iCloud). `~/Desktop/Margin` is stale and holds the local `backup-before-rewrite` branch.
 - pnpm's 1-day `minimumReleaseAge` stays on; pin an older version instead of adding exclusions.

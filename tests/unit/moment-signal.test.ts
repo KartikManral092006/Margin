@@ -83,7 +83,9 @@ describe("momentFromSignal", () => {
   };
 
   it("turns marginbot's message into a moment for this room", () => {
-    expect(momentFromSignal(message, room)).toMatchObject({
+    expect(momentFromSignal({ ...message, messageId: "nx9" }, room)).toMatchObject({
+      nexconnMessageId: "nx9",
+      votedByMe: false,
       id: row.id,
       tSec: 75,
       body: "Why O(n)?",
@@ -117,6 +119,12 @@ describe("momentFromSignal", () => {
 });
 
 describe("toMomentView", () => {
+  it("tells the viewer whether they voted", () => {
+    expect(toMomentView({ ...row, votes: [{ userId: "v1" }] }, "v1").votedByMe).toBe(true);
+    expect(toMomentView({ ...row, votes: [] }, "v1").votedByMe).toBe(false);
+    expect(toMomentView(row, "v1").votedByMe).toBe(false);
+  });
+
   it("shows the author's own clientId only to the author", () => {
     expect(toMomentView(row, "U".repeat(32))).toMatchObject({ mine: true, clientId: "c12345678" });
     expect(toMomentView(row, "someone-else")).toMatchObject({ mine: false, clientId: null });

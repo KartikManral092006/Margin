@@ -147,6 +147,7 @@ describe("ensureRoomChat", () => {
 
   it("answers busy, without spending quota, while another request creates the group", async () => {
     const { deps, call } = setup(() => ({}), { lockFree: false });
+    deps.sleep = vi.fn(async () => {});
     await expect(ensureRoomChat(deps, lecture, user)).rejects.toMatchObject({ reason: "busy" });
     expect(deps.allowGroupCreate).not.toHaveBeenCalled();
     expect(call).not.toHaveBeenCalled();
@@ -175,5 +176,26 @@ describe("ensureRoomChat", () => {
     });
     await expect(ensureRoomChat(deps, lecture, user)).rejects.toBeInstanceOf(NexconnApiError);
     expect(state.nexconnJoinedAt).toBeNull();
+  });
+});
+
+describe("ensureRoomChat when two people open a new room together", () => {
+  it("waits for the other request to create the group, then joins without creating", async () => {
+    const { deps, order, state } = setup(() => ({}), { lockFree: false });
+    let checks = 0;
+    deps.sleep = vi.fn(async () => {
+      if (++checks === 2) state.groupReady = true; // the other request finished
+    });
+    await expect(ensureRoomChat(deps, lecture, user)).resolves.toMatchObject({ chat: "ok" });
+    expect(order).not.toContain("/v4/group-channel/create");
+    expect(order).toContain("/v4/group-channel/join");
+    expect(deps.allowGroupCreate).not.toHaveBeenCalled();
+  });
+
+  it("answers busy only after waiting, if the group still doesn't exist", async () => {
+    const { deps } = setup(() => ({}), { lockFree: false });
+    deps.sleep = vi.fn(async () => {});
+    await expect(ensureRoomChat(deps, lecture, user)).rejects.toMatchObject({ reason: "busy" });
+    expect(deps.sleep).toHaveBeenCalled();
   });
 });

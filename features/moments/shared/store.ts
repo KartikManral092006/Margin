@@ -22,6 +22,12 @@ export type MomentsAction =
   | { type: "failed"; clientId: string; error: string; retryable: boolean }
   | { type: "retrying"; clientId: string }
   | { type: "merge"; moments: MomentView[]; at: number }
+  // A live MG:Moment: adds a doubt this browser doesn't have (or replaces its own optimistic
+  // copy) but never overwrites fuller data from the API, e.g. after a resent signal.
+  | { type: "incoming"; moment: MomentView; at: number }
+  // Optimistic vote / status change; the API's answer (a "merge") then settles it.
+  | { type: "vote"; id: string; on: boolean }
+  | { type: "status"; id: string; status: "open" | "resolved" }
   | {
       type: "replaceWindow";
       from: number;
@@ -100,6 +106,31 @@ export function momentsReducer(state: MomentsState, action: MomentsAction): Mome
       return {
         items: state.items.map((item) =>
           item.key === action.clientId ? { ...item, local: "sending", error: null } : item,
+        ),
+      };
+    case "incoming": {
+      if (state.items.some((item) => item.key === action.moment.id && item.local === null)) {
+        return state;
+      }
+      return { items: sorted(upsertServer(state.items, action.moment, action.at)) };
+    }
+    case "vote": {
+      let changed = false;
+      const items = state.items.map((item) => {
+        if (item.key !== action.id || item.votedByMe === action.on) return item;
+        changed = true;
+        return {
+          ...item,
+          votedByMe: action.on,
+          upvotes: Math.max(0, item.upvotes + (action.on ? 1 : -1)),
+        };
+      });
+      return changed ? { items } : state;
+    }
+    case "status":
+      return {
+        items: state.items.map((item) =>
+          item.key === action.id ? { ...item, status: action.status } : item,
         ),
       };
     case "merge": {

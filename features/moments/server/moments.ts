@@ -1,5 +1,5 @@
 import { Prisma, type PrismaClient } from "@/lib/generated/prisma/client";
-import { SendStatus } from "@/lib/generated/prisma/enums";
+import { MomentStatus, SendStatus } from "@/lib/generated/prisma/enums";
 import { nexconnDisplayName } from "@/features/auth/shared/display-name";
 import type { CreateMomentInput, MomentView } from "@/features/moments/shared/schemas";
 import { MAX_MOMENTS_PER_GET } from "@/features/moments/shared/schemas";
@@ -13,7 +13,19 @@ const momentWithAuthor = {
 
 export type MomentRow = Prisma.MomentGetPayload<typeof momentWithAuthor>;
 
-export function toMomentView(row: MomentRow, viewerId: string): MomentView {
+// Author plus whether this viewer has voted (at most one row).
+function forViewer(viewerId: string) {
+  return {
+    include: {
+      user: { select: { name: true, nexconnUserId: true } },
+      votes: { where: { userId: viewerId }, select: { userId: true } },
+    },
+  } satisfies Prisma.MomentDefaultArgs;
+}
+
+export type ViewerMomentRow = MomentRow & { votes?: { userId: string }[] };
+
+export function toMomentView(row: ViewerMomentRow, viewerId: string): MomentView {
   const mine = row.userId === viewerId;
   return {
     id: row.id,
@@ -30,6 +42,8 @@ export function toMomentView(row: MomentRow, viewerId: string): MomentView {
       : "Former member",
     mine,
     clientId: mine ? row.clientId : null,
+    votedByMe: row.votes?.some((vote) => vote.userId === viewerId) ?? false,
+    nexconnMessageId: row.nexconnMessageId,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -57,13 +71,15 @@ export async function createMoment(
   });
   if (existing) return { ok: true, moment: existing, created: false };
 
+  let tSec = Math.floor(input.tSec);
   if (input.parentId) {
-    // Replies stay one level deep and inside the same lecture.
+    // Replies stay one level deep, inside the same lecture, at the parent's second.
     const parent = await db.moment.findFirst({
       where: { id: input.parentId, lectureId: input.lectureId, parentId: null },
-      select: { id: true },
+      select: { tSec: true },
     });
     if (!parent) return { ok: false, error: "parent_not_found" };
+    tSec = parent.tSec;
   }
 
   try {
@@ -73,7 +89,7 @@ export async function createMoment(
         lectureId: input.lectureId,
         userId: input.userId,
         clientId: input.clientId,
-        tSec: Math.floor(input.tSec),
+        tSec,
         body: input.body,
         parentId: input.parentId ?? null,
       },
@@ -90,20 +106,125 @@ export async function createMoment(
   }
 }
 
-export function listMomentsInWindow(db: PrismaClient, lectureId: string, from: number, to: number) {
+export function listMomentsInWindow(
+  db: PrismaClient,
+  lectureId: string,
+  from: number,
+  to: number,
+  viewerId: string,
+) {
   return db.moment.findMany({
     where: { lectureId, tSec: { gte: from, lte: to } },
     orderBy: [{ tSec: "asc" }, { createdAt: "asc" }],
     take: MAX_MOMENTS_PER_GET,
-    ...momentWithAuthor,
+    ...forViewer(viewerId),
   });
 }
 
-export function listMomentsByIds(db: PrismaClient, lectureId: string, ids: string[]) {
+export function listMomentsByIds(
+  db: PrismaClient,
+  lectureId: string,
+  ids: string[],
+  viewerId: string,
+) {
   return db.moment.findMany({
     where: { lectureId, id: { in: ids } },
-    ...momentWithAuthor,
+    ...forViewer(viewerId),
   });
+}
+
+export type MomentActionError = "not_found" | "own_moment" | "not_author" | "is_reply";
+
+// Idempotent: voting twice or removing a missing vote changes nothing. The count changes in
+// the same transaction as the Vote row, so it can't drift.
+export async function setVote(
+  db: PrismaClient,
+  input: { momentId: string; lectureId: string; userId: string; on: boolean },
+): Promise<
+  { ok: true; moment: ViewerMomentRow; changed: boolean } | { ok: false; error: MomentActionError }
+> {
+  const moment = await db.moment.findFirst({
+    where: { id: input.momentId, lectureId: input.lectureId },
+    select: { userId: true },
+  });
+  if (!moment) return { ok: false, error: "not_found" };
+  if (moment.userId === input.userId) return { ok: false, error: "own_moment" };
+
+  const changed = await db.$transaction(async (tx) => {
+    if (input.on) {
+      const { count } = await tx.vote.createMany({
+        data: [{ momentId: input.momentId, userId: input.userId }],
+        skipDuplicates: true,
+      });
+      if (count === 1) {
+        await tx.moment.update({
+          where: { id: input.momentId },
+          data: { upvotes: { increment: 1 } },
+        });
+      }
+      return count === 1;
+    }
+    const { count } = await tx.vote.deleteMany({
+      where: { momentId: input.momentId, userId: input.userId },
+    });
+    if (count === 1) {
+      await tx.moment.update({
+        where: { id: input.momentId },
+        data: { upvotes: { decrement: 1 } },
+      });
+    }
+    return count === 1;
+  });
+
+  const row = await db.moment.findUniqueOrThrow({
+    where: { id: input.momentId },
+    ...forViewer(input.userId),
+  });
+  return { ok: true, moment: row, changed };
+}
+
+// The asker marks their own doubt resolved or open again (Day 10 adds answerers and hosts).
+export async function setResolved(
+  db: PrismaClient,
+  input: { momentId: string; lectureId: string; userId: string; resolved: boolean },
+): Promise<
+  { ok: true; moment: ViewerMomentRow; changed: boolean } | { ok: false; error: MomentActionError }
+> {
+  const moment = await db.moment.findFirst({
+    where: { id: input.momentId, lectureId: input.lectureId },
+    select: { userId: true, parentId: true, status: true },
+  });
+  if (!moment) return { ok: false, error: "not_found" };
+  if (moment.parentId !== null) return { ok: false, error: "is_reply" };
+  if (moment.userId !== input.userId) return { ok: false, error: "not_author" };
+
+  const status = input.resolved ? MomentStatus.resolved : MomentStatus.open;
+  const changed = moment.status !== status;
+  if (changed) await db.moment.update({ where: { id: input.momentId }, data: { status } });
+  const row = await db.moment.findUniqueOrThrow({
+    where: { id: input.momentId },
+    ...forViewer(input.userId),
+  });
+  return { ok: true, moment: row, changed };
+}
+
+export const MARKER_BUCKET_SEC = 15;
+const MAX_MARKER_BUCKETS = 6000;
+
+// Where doubts cluster across the whole lecture, in 15-second buckets (top-level doubts only).
+export async function markerBuckets(
+  db: PrismaClient,
+  lectureId: string,
+): Promise<{ tSec: number; count: number }[]> {
+  const rows = await db.$queryRaw<{ tSec: number; count: number }[]>(Prisma.sql`
+    SELECT ("tSec" / ${MARKER_BUCKET_SEC}) * ${MARKER_BUCKET_SEC} AS "tSec", COUNT(*)::int AS "count"
+    FROM "moments"
+    WHERE "lectureId" = ${lectureId} AND "parentId" IS NULL
+    GROUP BY 1
+    ORDER BY 1
+    LIMIT ${MAX_MARKER_BUCKETS}
+  `);
+  return rows.map((row) => ({ tSec: Number(row.tSec), count: Number(row.count) }));
 }
 
 // `attempted: false` records a skipped send (no group yet), which doesn't use up a retry.

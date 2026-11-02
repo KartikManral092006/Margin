@@ -29,6 +29,7 @@ model User {
   lecturesCreated    Lecture[]
   lectureMemberships LectureMembership[]
   moments            Moment[]           @relation("MomentAuthor")
+  votes              Vote[]
   pinnedMoments      Moment[]           @relation("MomentPinnedBy")
 
   @@map("users")
@@ -165,10 +166,24 @@ model Moment {
   pinnedBy         User?        @relation("MomentPinnedBy", fields: [pinnedById], references: [id], onDelete: SetNull)
   parent           Moment?      @relation("MomentReplies", fields: [parentId], references: [id], onDelete: Cascade)
   replies          Moment[]     @relation("MomentReplies")
+  votes            Vote[]
 
   @@unique([userId, clientId])
   @@index([lectureId, tSec])
   @@index([parentId])
   @@index([lectureId, sendStatus])
   @@map("moments")
+}
+
+// "I have this doubt too". Moment.upvotes changes only in the same transaction as a Vote row.
+model Vote {
+  momentId  String
+  userId    String
+  createdAt DateTime @default(now())
+  moment    Moment   @relation(fields: [momentId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([momentId, userId])
+  @@index([userId])
+  @@map("votes")
 }

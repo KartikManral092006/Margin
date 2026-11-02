@@ -3,6 +3,7 @@ import { SYSTEM_USER_ID } from "@/features/nexconn/shared/config";
 import { decodeContent, MG, roomMomentSchema } from "@/features/nexconn/shared/messages";
 
 export type IncomingMessage = {
+  messageId?: string;
   channelId?: string;
   messageType?: string;
   senderUserId?: string;
@@ -32,6 +33,8 @@ export function momentFromSignal(
     // Corrected to true by the store when this browser already holds the author's copy.
     mine: false,
     clientId: payload.clientId,
+    votedByMe: false,
+    nexconnMessageId: message.messageId ?? null,
     createdAt: payload.createdAt,
   };
 }

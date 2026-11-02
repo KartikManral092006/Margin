@@ -40,8 +40,8 @@ export async function GET(request: NextRequest, ctx: Ctx) {
 
   const rows =
     query.data.kind === "ids"
-      ? await listMomentsByIds(db, id, query.data.ids)
-      : await listMomentsInWindow(db, id, query.data.from, query.data.to);
+      ? await listMomentsByIds(db, id, query.data.ids, auth.user.id)
+      : await listMomentsInWindow(db, id, query.data.from, query.data.to, auth.user.id);
   return json({ moments: rows.map((row) => toMomentView(row, auth.user.id)) });
 }
 

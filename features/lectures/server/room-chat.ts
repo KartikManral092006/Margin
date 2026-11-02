@@ -18,6 +18,8 @@ export type RoomChatDeps = {
   client: NexconnClient;
   // Issues (and caches) an access token, which is how Nexconn registers a user.
   registerUser: (user: { userId: string; name: string }) => Promise<unknown>;
+  // Waits between checks while another request is creating the room's group.
+  sleep?: (ms: number) => Promise<void>;
   // Per-user budget first, then the global one; both deny when Redis is down.
   allowGroupCreate: (userId: string) => Promise<boolean>;
   // One group create per room at a time, so parallel requests spend one quota unit.
@@ -26,6 +28,9 @@ export type RoomChatDeps = {
 };
 
 export type RoomChatResult = { chat: "ok"; channelId: string } | { chat: "full" };
+
+const GROUP_WAIT_MS = 4000;
+const GROUP_WAIT_STEP_MS = 250;
 
 // Called only when a user opens chat, never on page view: rooms work from Postgres alone,
 // and only rooms people actually chat in get a Nexconn group. Every step is idempotent.
@@ -52,11 +57,28 @@ export async function ensureRoomChat(
       })
     )?.nexconnGroupReadyAt != null;
 
+  const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+
+  // Someone else holds the room's lock (e.g. two people opened a new room together): wait a
+  // little for them to finish creating the group instead of failing at once.
+  const waitForOtherCreator = async () => {
+    for (let waited = 0; waited < GROUP_WAIT_MS; waited += GROUP_WAIT_STEP_MS) {
+      await sleep(GROUP_WAIT_STEP_MS);
+      if (await groupRecorded()) return true;
+      if (await deps.acquireGroupLock(lecture.id)) {
+        await deps.releaseGroupLock(lecture.id);
+        return false;
+      }
+    }
+    return false;
+  };
+
   // `recreate` skips the "already recorded" shortcut: used when Nexconn says the group is gone.
   const ensureGroup = async (recreate: boolean) => {
     if (!(await deps.acquireGroupLock(lecture.id))) {
       if (!recreate && (await groupRecorded())) return;
-      throw new ChatUnavailableError("busy");
+      if (!recreate && (await waitForOtherCreator())) return;
+      if (!(await deps.acquireGroupLock(lecture.id))) throw new ChatUnavailableError("busy");
     }
     try {
       if (!recreate && (await groupRecorded())) return;
