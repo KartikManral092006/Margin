@@ -28,10 +28,11 @@ model User {
 
   lecturesCreated    Lecture[]
   lectureMemberships LectureMembership[]
-  moments            Moment[]           @relation("MomentAuthor")
+  moments            Moment[]            @relation("MomentAuthor")
   votes              Vote[]
   hostedParties      WatchParty[]
-  pinnedMoments      Moment[]           @relation("MomentPinnedBy")
+  lostReactions      LostReaction[]
+  pinnedMoments      Moment[]            @relation("MomentPinnedBy")
 
   @@map("users")
 }
@@ -112,6 +113,7 @@ model Lecture {
   memberships         LectureMembership[]
   moments             Moment[]
   parties             WatchParty[]
+  lostReactions       LostReaction[]
 
   // Never findUnique/upsert/update/delete by youtubeId: Prisma drops the predicate and can
   // return a private row. Use findFirst({ where: { youtubeId, visibility: "public" } }).
@@ -204,4 +206,19 @@ model WatchParty {
   @@unique([lectureId], map: "watch_parties_one_active_key", where: { endedAt: null })
   @@index([lectureId, startedAt(sort: Desc)])
   @@map("watch_parties")
+}
+
+// "I'm lost" (the L key): one per person per 15-second bucket of a lecture (bucket = tSec / 15).
+model LostReaction {
+  lectureId String
+  userId    String
+  bucket    Int
+  createdAt DateTime @default(now())
+  lecture   Lecture  @relation(fields: [lectureId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([lectureId, userId, bucket])
+  @@index([lectureId, bucket])
+  @@index([userId])
+  @@map("lost_reactions")
 }

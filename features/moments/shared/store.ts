@@ -1,4 +1,5 @@
 import type { MomentView } from "@/features/moments/shared/schemas";
+import { isLetterShortcut, type KeyEventInfo } from "@/lib/shortcuts";
 
 // Client-side list of moments. Pure, so it is tested in node; the React side wraps it.
 // Keys: a moment from the server is keyed by its id; an optimistic one by its clientId until
@@ -158,20 +159,9 @@ export function momentsReducer(state: MomentsState, action: MomentsAction): Mome
 }
 
 // Keyboard: D opens the composer, unless the user is typing somewhere or holds a modifier.
-export function isComposerShortcut(event: {
-  key: string;
-  ctrlKey: boolean;
-  metaKey: boolean;
-  altKey: boolean;
-  isComposing: boolean;
-  targetTag: string | null;
-  targetEditable: boolean;
-}): boolean {
-  if (event.key !== "d" && event.key !== "D") return false;
-  if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return false;
-  if (event.targetEditable) return false;
-  const tag = event.targetTag?.toUpperCase() ?? null;
-  return tag !== "INPUT" && tag !== "TEXTAREA" && tag !== "SELECT";
+// D opens the composer (outside text fields, without modifiers).
+export function isComposerShortcut(event: KeyEventInfo): boolean {
+  return isLetterShortcut(event, "d");
 }
 
 export function newClientId(

@@ -1,17 +1,21 @@
 "use client";
 
+import { heatLevels, type HeatBucket } from "@/features/heatmap/shared/heatmap";
 import type { PlayerTimeStore } from "@/features/player/client/time-store";
 import { usePlayer } from "@/features/player/client/use-player";
 import { formatClock } from "@/features/player/shared/format";
 import type { Markers } from "@/features/moments/client/use-room-moments";
 
 // A bar under the player (never over it) showing where doubts cluster across the whole
-// lecture. Each marker is a button: clicking it seeks there, which loads that window's doubts.
+// lecture, over a heatmap of where people got lost (redder = more people). Each marker is a
+// button: clicking it seeks there, which loads that window's doubts.
 export function TimelineMarkers({
   markers,
+  heat = [],
   store,
 }: {
   markers: Markers | null;
+  heat?: HeatBucket[];
   store: PlayerTimeStore;
 }) {
   const duration = usePlayer(store, (s) => s.duration);
@@ -19,10 +23,12 @@ export function TimelineMarkers({
   const progress = usePlayer(store, (s) =>
     s.duration ? Math.round((s.tSec / s.duration) * 200) / 2 : 0,
   );
-  if (!duration || !markers) return null;
+  if (!duration) return null;
 
-  const buckets = markers.buckets.filter((bucket) => bucket.tSec <= duration);
+  // The heat layer shows even while the doubt markers load (or if loading them failed).
+  const buckets = (markers?.buckets ?? []).filter((bucket) => bucket.tSec <= duration);
   const maxCount = Math.max(1, ...buckets.map((bucket) => bucket.count));
+  const levels = heatLevels(heat, duration);
 
   return (
     <div className="px-4 sm:px-0">
@@ -31,6 +37,20 @@ export function TimelineMarkers({
         aria-label={`Doubts across the lecture: ${buckets.length} places`}
         className="relative h-8 w-full rounded-md bg-muted"
       >
+        {/* Clipped to the rounded bar on its own, so markers at the very ends stay whole. */}
+        <div aria-hidden className="absolute inset-0 overflow-hidden rounded-md">
+          {levels.map((level) => (
+            <div
+              key={level.startSec}
+              className="absolute inset-y-0 bg-rose-500"
+              style={{
+                left: `${(level.startSec / duration) * 100}%`,
+                width: `max(2px, ${((level.endSec - level.startSec) / duration) * 100}%)`,
+                opacity: 0.15 + 0.6 * level.level,
+              }}
+            />
+          ))}
+        </div>
         <div
           aria-hidden
           className="absolute inset-y-0 w-0.5 bg-foreground/60"
@@ -61,8 +81,15 @@ export function TimelineMarkers({
       </div>
       <div className="mt-1 flex justify-between text-[11px] text-muted-foreground tabular-nums">
         <span>0:00</span>
-        <span>
-          {buckets.length === 0 ? "No doubts in this lecture yet" : "Doubts across the lecture"}
+        <span className="flex items-center gap-3">
+          <span className="flex items-center gap-1">
+            <span aria-hidden className="inline-block h-2.5 w-1 rounded-sm bg-amber-500" />
+            {markers && buckets.length === 0 ? "No doubts yet" : "Doubts"}
+          </span>
+          <span className="flex items-center gap-1">
+            <span aria-hidden className="inline-block h-2.5 w-2.5 rounded-sm bg-rose-500/60" />
+            {levels.length === 0 ? "Nobody lost yet" : "Where people got lost"}
+          </span>
         </span>
         <span>{formatClock(duration)}</span>
       </div>

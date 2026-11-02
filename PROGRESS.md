@@ -14,6 +14,7 @@ Read this first at the start of every session. Update it at the end of every day
 | 6   | Mon Nov 2 | Threads      | Done (built four days early); jump to 30:00 loads in 130 ms                |
 | 7   | Mon Nov 2 | P0           | **P0 reached**: presence, room chat, phone polish, Playwright E2E green    |
 | 8   | Mon Nov 2 | Watch party  | Done (six days early); live drift ≤ 0.45 s, events reach viewers in ~0.4 s |
+| 9   | Mon Nov 2 | Heatmap      | Done (seven days early); a mark reaches other viewers in ~1-1.5 s          |
 
 ## Nexconn plan and remaining risks (updated Nov 2)
 
@@ -236,6 +237,34 @@ Not done:
 2. Console: "Restrict messaging to joined participants" (Open Channels) is Kartik's to switch on. Open-channel metadata isn't needed (state is in Redis).
 3. A user can still start a party on a lecture and keep it alive with heartbeats for up to 4 hours (one per account). Moderation tools come on Day 13.
 
+## Day 9: confusion heatmap (built Nov 2)
+
+Done:
+
+- **"I'm lost"** (`features/heatmap/`): the L key or the "I'm lost here" button marks the current 15-second bucket (bucket = tSec / 15); pressing again unmarks it, and the notice has an Undo for the bucket it names. One per person per bucket (`LostReaction`, migration 0007, primary key lectureId + userId + bucket), so a count is a number of people. `POST`/`DELETE /api/lectures/[id]/lost` (idempotent, 20 per minute, same-origin JSON, marking joins the room like asking or voting), `GET /api/lectures/[id]/heatmap` (counts + the viewer's own buckets). Off until the player is ready (a mark needs the real playhead, not 0:00).
+- **Privacy**: others see a spot only once 2 people marked it; your own marks always show to you. Live counts next to the named presence line ("Ana is here") would otherwise tell everyone who pressed L. The teacher view (Day 18) can show raw counts.
+- **Live**: Postgres is the truth; Redis keeps a version per lecture (bumped after each change) and the counts read at that version (a cached entry is used only while its version is current, so a reader that raced a write can't serve stale counts). The room's existing presence stream checks the version every second and sends `event: heatmap` (public counts) when it moves, plus a full read from Postgres once a minute in case a bump was lost to a Redis failure. No Nexconn messages (no quota, no chat-history clutter, no second connection per viewer).
+- **Bar**: the heat layer sits under the doubt markers (redder = more people, square-root scale), in bins of whole buckets (at most 90 across the video, each showing its busiest bucket: 45 s bins for an hour, 3-minute bins for 4.5 hours) so long lectures don't draw hairlines. "Most lost: 10:15-10:45 · 3 people" seeks there. The bar now shows even if the doubt markers failed to load. Legend: Doubts / Where people got lost.
+- **Client**: optimistic marks stay on top until the server's version includes them (or 15 s pass); requests go out one at a time so a quick mark-unmark arrives in order; a lost response re-reads the server instead of rolling back blindly; stream frames always apply (a Redis restart can move the version back) while a GET loses to anything newer.
+- **YouTube keys off** (`disablekb: 1`): with the video focused, YouTube's own L skipped 10 s forward instead of marking. Keyboard play/pause comes back with our own shortcuts (Day 12).
+- **Sign-in fix**: the form now sends what the email box shows. On a slow load, text typed before React hydrated was in the box but not in state, so the request went out empty ("Something went wrong"). Found by the E2E run on a loaded machine.
+- **Review**: workflow (3 reviewers + adversarial verification, 21 agents) confirmed 14 issues (2 duplicates); all fixed above (YouTube's L key, who-pressed-it privacy, lost version bumps, version resets, stale `mine`, out-of-order toggles, rollback after a saved change, marks at 0:00 before the player is ready, undo after the bucket boundary, heat hidden without markers, clipped edge markers, marking without joining).
+
+Verified:
+
+- Unit (heatmap): buckets and limits, square-root levels, binning of long videos, hottest stretch, optimistic adjust, the 2-person rule and own-mark overlay, the L shortcut outside text fields.
+- Integration (Postgres + Redis): one mark per person even when sent twice at once; the version moves only on a change; cache served until the next change; a reader that races a change never serves stale counts (mutation-checked: removing the version check fails it); a lost bump is healed by a fresh read; Postgres answers when Redis is down; deleting an account deletes its marks.
+- E2E (`tests/e2e/heatmap.spec.ts`, two browsers, one a 375 px phone): A's lone mark shows to A only; B's mark makes both see "2 people", A live; A's undo shows live on B; B's Undo works. A change reached the other browser in 0.9-1.6 s across 6 runs (curl on the stream: 0.6-1.2 s). Full suite 4/4, three times in a row (with load average 21-26 from other apps).
+- Screenshots at 375 px and 1280 px with a seeded 3-person hotspot on a 4.5-hour lecture.
+- Format, lint, typecheck, 423 unit tests, 25 integration tests, migration drift 0, production build and secret scan clean.
+
+Not done:
+
+1. Days 5-7 still have had no independent review.
+2. One E2E run (before the 1-second check) missed a live update for 15 s; not reproduced in 9 runs since. Separately, the dev server compiling a route on its first request stalls the stream for seconds (production compiles ahead); the E2E compiles `/lost` before timing.
+3. The app's dark theme doesn't follow the system setting, so a dark-mode screenshot couldn't be taken this way.
+4. Anything that deletes `lost_reactions` outside `setLost` (a future account deletion) must call `invalidateHeatmap` for the lectures involved; the E2E teardown does.
+
 ## Decisions (do not re-litigate without a reason)
 
 - Next 16: route guards go in `proxy.ts` (not `middleware.ts`); `next lint` is gone, use `pnpm lint`.
@@ -249,6 +278,8 @@ Not done:
 - Watch-party sync uses a server clock offset (`GET /api/time`, NTP-style), never raw `Date.now()` across machines.
 - Watch-party state lives in Redis (saved by the host's POST), not open-channel KV. `MG:Sync` is the fast path only: viewers poll the saved state whenever no live message has arrived for 7.5 s.
 - The host's playback rate is part of the party state; viewers play at it and correct at ±0.25x around it.
+- Heatmap: 15-second buckets, one mark per person per bucket; others see a spot only from 2 people; live through the presence stream (version check every second, full read every minute), not Nexconn. Deleting reactions outside `setLost` requires `invalidateHeatmap`.
+- The YouTube player runs with `disablekb: 1`; room shortcuts (D, L, later Space and J/K) are ours.
 - One active party per lecture, one per host, at most 4 hours. Live party checks use devalice (host) and devbob (viewer) only; a second viewer is covered offline and in simulation.
 - YouTube playback rate only takes 0.25 steps; drift correction uses 1.25× / 0.75× for a computed duration.
 - Schema fixes to apply when the tables land: `Moment.pinnedAt/pinnedBy`; separate `LectureMembership` and `CourseMembership`; partial unique indexes through Prisma's native `partialIndexes` preview feature (a hand-written SQL index gets dropped by the next `migrate dev`; test the HNSW index the same way before Day 11); vote count updated in the same transaction as the vote.

@@ -14,6 +14,8 @@ import { MomentsPanel } from "@/features/moments/components/moments-panel";
 import { TimelineMarkers } from "@/features/moments/components/timeline-markers";
 import { ChatPanel } from "@/features/chat/components/chat-panel";
 import { usePresence } from "@/features/presence/client/use-presence";
+import { useHeatmap } from "@/features/heatmap/client/use-heatmap";
+import { LostControl } from "@/features/heatmap/components/lost-control";
 import { PresenceLine } from "@/features/presence/components/presence-line";
 import { useParty } from "@/features/party/client/use-party";
 import { PartyBanner, PartyPanel } from "@/features/party/components/party-panel";
@@ -64,15 +66,18 @@ export function RoomClient({
     if (process.env.NODE_ENV === "production") return;
     (window as unknown as { __marginPlayer?: PlayerTimeStore }).__marginPlayer = store;
   }, [store]);
+  const [playerError, setPlayerError] = useState<number | null>(null);
+  const [playerKey, setPlayerKey] = useState(0);
   const moments = useRoomMoments(lecture.id, store);
-  const presence = usePresence(lecture.id, store);
+  // "I'm lost" needs the real playhead: off until the player is ready, and if it failed.
+  const playerReady = usePlayer(store, (s) => s.ready);
+  const heat = useHeatmap(lecture.id, store, playerReady && playerError === null);
+  const presence = usePresence(lecture.id, store, heat.applyServer);
   const party = useParty(lecture.id, store, moments.status === "live");
   const [tab, setTab] = useState<"doubts" | "chat" | "party">("doubts");
   const showDoubts = useCallback(() => setTab("doubts"), []);
   const [memberCount, setMemberCount] = useState(lecture.memberCount);
   const [joinState, setJoinState] = useState<JoinState>("joining");
-  const [playerError, setPlayerError] = useState<number | null>(null);
-  const [playerKey, setPlayerKey] = useState(0);
   const [copied, setCopied] = useState(false);
   const joinStarted = useRef(false);
 
@@ -154,7 +159,8 @@ export function RoomClient({
           />
         )}
 
-        <TimelineMarkers markers={moments.markers} store={store} />
+        <TimelineMarkers markers={moments.markers} heat={heat.buckets} store={store} />
+        <LostControl heat={heat} store={store} />
 
         <section className="flex flex-col gap-3 px-4 sm:px-0">
           <div className="space-y-1">

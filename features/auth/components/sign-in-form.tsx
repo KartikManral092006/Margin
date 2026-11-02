@@ -49,11 +49,16 @@ export function SignInForm(props: {
 
   async function sendLink(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // What the box shows: text typed before the page finished loading is in the field but not
+    // yet in React state.
+    const typed = new FormData(event.currentTarget).get("email");
+    const address = (typeof typed === "string" ? typed : email).trim();
+    setEmail(address);
     setError(null);
     setStatus("sending");
     try {
       const result = await authClient.signIn.magicLink({
-        email: email.trim(),
+        email: address,
         callbackURL: props.callbackURL,
         errorCallbackURL: SIGN_IN_PATH,
       });
@@ -126,6 +131,7 @@ export function SignInForm(props: {
             </label>
             <Input
               id="email"
+              name="email"
               type="email"
               autoComplete="email"
               inputMode="email"

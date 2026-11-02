@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
+import type { Heatmap } from "@/features/heatmap/shared/heatmap";
 import type { PlayerTimeStore } from "@/features/player/client/time-store";
 import { usePlayer } from "@/features/player/client/use-player";
 import {
@@ -19,9 +20,15 @@ function sendHeartbeat(lectureId: string, store: PlayerTimeStore) {
   }).catch(() => {});
 }
 
-// Reports where this viewer is in the video and listens to who else is where.
-export function usePresence(lectureId: string, store: PlayerTimeStore) {
+// Reports where this viewer is in the video and listens to who else is where. The same stream
+// carries heatmap changes ("I'm lost" counts), handed to onHeatmap.
+export function usePresence(
+  lectureId: string,
+  store: PlayerTimeStore,
+  onHeatmap?: (heatmap: Heatmap) => void,
+) {
   const [snapshot, setSnapshot] = useState<PresenceSnapshot | null>(null);
+  const handleHeatmap = useEffectEvent((heatmap: Heatmap) => onHeatmap?.(heatmap));
   const slot = usePlayer(store, (s) => presenceWindow(s.tSec));
 
   // Heartbeat on mount, whenever my 30-second window changes, and every 10 s.
@@ -53,6 +60,13 @@ export function usePresence(lectureId: string, store: PlayerTimeStore) {
         setSnapshot(JSON.parse((event as MessageEvent<string>).data) as PresenceSnapshot);
       } catch {
         // Ignore a malformed frame; the next one replaces it.
+      }
+    });
+    source.addEventListener("heatmap", (event) => {
+      try {
+        handleHeatmap(JSON.parse((event as MessageEvent<string>).data) as Heatmap);
+      } catch {
+        // Ignore a malformed frame; the next change sends a new one.
       }
     });
     return () => source.close();

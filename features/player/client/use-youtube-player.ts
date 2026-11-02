@@ -49,6 +49,9 @@ export function useYouTubePlayer(
           playerVars: {
             playsinline: 1,
             rel: 0,
+            // YouTube's own keys (J/K/L skip and pause) would fire instead of the room's
+            // shortcuts whenever the video has focus: L would skip 10 s instead of "I'm lost".
+            disablekb: 1,
             origin: window.location.origin,
             ...(startSec ? { start: startSec } : {}),
           },
