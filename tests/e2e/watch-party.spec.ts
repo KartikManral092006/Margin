@@ -1,8 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
+import { FAKE_YOUTUBE, fakeYouTube } from "./fake-youtube";
 import { e2eEmail, noHorizontalScroll, signIn } from "./helpers";
 
 // A long public lecture (4.5 h), so the host can jump far ahead.
 const VIDEO = "https://www.youtube.com/watch?v=rfscVS0vtbw";
+const VIDEO_SEC = 16_012;
 
 // The host plays without a click (page.evaluate is not a user gesture).
 test.use({ launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] } });
@@ -62,6 +64,10 @@ test("a host starts a watch party; a viewer on a phone follows play, pause and a
     isMobile: true,
     hasTouch: true,
   });
+  if (FAKE_YOUTUBE) {
+    await fakeYouTube(hostContext, VIDEO_SEC);
+    await fakeYouTube(viewerContext, VIDEO_SEC);
+  }
   const h = await hostContext.newPage();
   const v = await viewerContext.newPage();
 

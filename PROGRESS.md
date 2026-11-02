@@ -230,6 +230,7 @@ Verified:
 - One live run before the review fixes had the viewer miss a pause and drift (its full log wasn't kept). Two confirmed review findings fit it (viewers trusting a silent channel; the follower reset when the channel connects); after the fixes, four live runs in a row were clean.
 - E2E: new `tests/e2e/watch-party.spec.ts` (host starts, a viewer on a phone joins from the banner and follows play, pause and a jump to 30:00 within 1 s; ending lets the viewer go). Suite 3/3, twice in a row.
 - Format, lint, typecheck, 405 unit tests, 19 integration tests, migration drift 0, production build and secret scan clean. Lint now ignores `.next-e2e/` (the E2E server's build output failed lint whenever it was present).
+- **CI fix (Nov 2, after Day 9)**: this test failed on GitHub for Days 8 and 9 (the viewer stayed `cued`). YouTube refuses playback to GitHub's datacenter IPs (`LOGIN_REQUIRED`: "Sign in to confirm you're not a bot", reported to the embed as error 150, so the room said "The owner doesn't allow this video to play on other sites"). The other E2E tests only load the player, so they pass there. On CI (or with `E2E_FAKE_YOUTUBE=1`) this test now uses `tests/e2e/fake-youtube.ts`, a stand-in for the IFrame API with the same methods, events and state codes, 300 ms of buffering before play and after a seek, and a clock-driven playhead. Locally it still uses real YouTube. Checked: breaking the stand-in's `playVideo` fails the test; full suite 4/4 with `CI=1`.
 
 Not done:
 
@@ -308,4 +309,5 @@ Not done:
 - Day 2: record G4 (stream) and G6 (ChatUI) results; confirm G1's senderUserId.
 - Day 3: Google keys, Resend domain, then test Google sign-in and account linking (see Day 3 "Not done").
 - Push to GitHub and get a first green CI run (needs the repo URL and your OK).
+- Real users on shared IPs (campus NAT, VPNs) can hit YouTube's bot check too, and the room then blames the video's owner (error 150). Consider wording error 150 as "YouTube wouldn't play this here" with "Open on YouTube".
 - Confirm the Nexconn plan bills $0 (see the plan section above).
