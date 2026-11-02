@@ -9,16 +9,38 @@ Read this first at the start of every session. Update it at the end of every day
 | 1   | Sun Nov 1 | Scaffold     | Done locally; CI pending first push                                 |
 | 2   | Mon Nov 2 | Nexconn test | Code done (built early on Nov 1); live two-browser run pending keys |
 
-## Plan risks found on Nov 1 (need a decision from Kartik)
+## Nexconn plan and remaining risks (updated Nov 2)
 
-From `docs/nexconn.md` §8 (Nexconn pricing page and error codes). These affect the 21-day plan itself:
+**Plan:** Kartik selected **Pro, 10,000 MAU** on Nov 2, meant to be the free offer announced Oct 22, 2026 (10,000 MAU, Pro features, 500 peak concurrent connections, 10 GB storage, 180-day history, no card; enroll by sending one message before Dec 31, 2026). **Confirm in the Console billing page that the price is $0, not the paid Pro 10k tier ($860/month).**
 
-1. **Registered-user cap.** Error `2007` says the Free plan allows **100 registered users** (deactivated users count). The plan targets **150+ learners**. Options: a paid IM plan before the Day 14 launch, or reuse IDs only for real users (no test users beyond devalice/devbob/marginbot). Confirm the real cap in the Console on Day 2.
-2. **Free plan expires one month after app creation**, then the app is blocked until a paid plan is chosen. Judging runs Nov 23–27. Record the app creation date; if it is before Oct 27, judging falls outside the free month.
-3. **About 100 concurrent connections** on Free (5% of 2,000 MAU). A full watch party plus class launch can hit it.
-4. **Translation: 10,000 characters free**, then a card is needed. Cache every translation in Postgres by (momentId, lang) and never re-translate.
-5. **Call SDK (voice huddle, Day 18):** the Free plan "is available for Nexconn Chat only". Calling may need a paid RTC service; no free minutes are documented. Check the challenge FAQ's "add a card for 10,000 minutes" claim in the Console.
-6. **ChatUI does not support portrait mobile browsers** and does not render message metadata or open channels. The definition of done requires phone width, so the room UI (moments, votes, party chat) must be our own React components on the raw SDK; ChatUI is only usable for desktop DMs.
+With this plan the old Free-plan risks (100-registration cap, one-month expiry, ~100 concurrent connections, Starter-only feature gaps) no longer apply, provided the billing check above passes.
+
+Remaining risks:
+
+1. **Translation quota** is not mentioned in the offer; assume 10,000 characters. Cache every translation in Postgres by (momentId, lang) and never re-translate.
+2. **Call SDK (voice huddle, Day 18)** is not covered by the chat offer. Per the challenge FAQ, a card unlocks 10,000 free call minutes; check that it is not a plan fee before adding it.
+3. **ChatUI does not support portrait mobile browsers** and does not render message metadata or open channels. The definition of done requires phone width, so the room UI (moments, votes, party chat) must be our own React components on the raw SDK; ChatUI is only usable for desktop DMs.
+4. **Traction proof uses Console active users.** Each app has **one** App Key for development, testing and release (`/chatsdk-web.md`), so dev tests (devalice, devbob, marginbot) count as users too. Keep test users to those three.
+
+## Nexconn Console settings checklist
+
+Most are in Console > Chat > Chat Settings (console.nexconn.ai/agile/im/service/config), inside the named section.
+
+| When   | Section                    | Setting                                                  | Value                                      |
+| ------ | -------------------------- | -------------------------------------------------------- | ------------------------------------------ |
+| Day 2  | Billing                    | Plan price                                               | Confirm $0 (free 10k-MAU offer)            |
+| Day 2  | Messages                   | Translation                                              | Enable                                     |
+| Day 2  | Group Channels             | Enable pre-join history access by new member             | Enable                                     |
+| Always | Key Management             | App Secret                                               | Never reset (invalidates all tokens)       |
+| Day 7  | Users (if present)         | Online status subscription                               | Enable if a switch exists                  |
+| Day 8  | Open Channels              | Open channel metadata (KV)                               | Enable                                     |
+| Day 8  | Open Channels              | Restrict messaging to joined participants                | Enable                                     |
+| Day 8  | Open Channels              | Allow participation in multiple channels                 | Leave off                                  |
+| Day 13 | Security & Moderation      | Moderate messages sent by server API                     | Enable                                     |
+| Day 14 | Webhooks                   | Webhook URL                                              | Production URL (only if webhooks are used) |
+| Day 14 | Messages                   | Include Server API Messaging in post-event webhooks      | Enable together with webhooks              |
+| Day 14 | Allowed domains (if asked) | Production domain                                        | Add                                        |
+| Day 18 | Call > Call Subscription   | Calling (card for 10,000 free minutes per challenge FAQ) | Activate; confirm no monthly fee           |
 
 ## Day 1: scaffold (Nov 1)
 
@@ -57,7 +79,7 @@ Verified locally without keys: lint, typecheck, unit tests, build; `/dev/*`, tok
 
 ### How to run the live test (needs your keys; uses a small amount of quota)
 
-1. Nexconn Console: copy the **development** App Key and App Secret into `.env` (`NEXCONN_APP_KEY`, `NEXCONN_APP_SECRET`), set `NEXCONN_AREA` to the app's data center (SG, NA or SA), enable Translation.
+1. Nexconn Console > Key Management (console.nexconn.ai/agile/apps/km): copy the App Key and App Secret into `.env` (`NEXCONN_APP_KEY`, `NEXCONN_APP_SECRET`), set `NEXCONN_AREA` to the app's data center (SG, NA or SA), enable Translation.
 2. `pnpm db:up && pnpm dev`, open `http://127.0.0.1:3000/dev/nexconn` in Chrome (devalice) and in an incognito window (devbob).
 3. Both: pick the user, **Connect**. One of them: **Setup dev group**.
 4. Run G1–G6 in order (client moment, server moment, upvote server then browser, stream, Hindi text then translate, ChatUI). Copy each event log here.
@@ -66,17 +88,19 @@ Quota used by one full run: 3 registered users (devalice, devbob, marginbot), ab
 
 ### Go / no-go (fill in after the live run)
 
-| ID  | Check                                                     | Result | Fallback if it fails                                      |
-| --- | --------------------------------------------------------- | ------ | --------------------------------------------------------- |
-| G0  | Token issued, both browsers CONNECTED                     |        | Check area vs data center, dev vs prod key                |
-| G1  | Client `MG:Moment` arrives decoded in the other browser   |        | Moments as text + Postgres structure                      |
-| G2  | Server-sent `MG:Moment` arrives (and echoes to author)    |        | Optimistic insert from the API response                   |
-| G3  | Other browser gets `onMessageMetadataUpdated` from server |        | Votes in Postgres, live updates over our SSE              |
-| G4  | Stream renders incrementally                              |        | Post the AI answer as one message, or stream over our SSE |
-| G5  | Hindi → English via `translateMessages`                   |        | `translateTexts` for moments, cached by (momentId, lang)  |
-| G6  | ChatUI mounts and renders the `mg-moment` bubble          |        | Custom React list; ChatUI only for DMs                    |
+| ID  | Check                                                     | Result                                                                                                                                                                     | Fallback if it fails                                      |
+| --- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| G0  | Token issued, both browsers CONNECTED                     | Pass (Nov 2): both browsers connected                                                                                                                                      | Check area vs data center, dev vs prod key                |
+| G1  | Client `MG:Moment` arrives decoded in the other browser   | Likely pass: B received a new MG:Moment (D1J7-DGJK-TCQF-GGC8) after A sent a client moment; client text (RC:TxtMsg) from A also reached B. Confirm senderUserId in the log | Moments as text + Postgres structure                      |
+| G2  | Server-sent `MG:Moment` arrives (and echoes to author)    | Pass: devbob server moment reached devalice decoded as an object with initial metadata; author also receives its own echo (direction 1)                                    | Optimistic insert from the API response                   |
+| G3  | Other browser gets `onMessageMetadataUpdated` from server | Pass: both browsers got metadataUpdated upvotes 1 then 2 within seconds                                                                                                    | Votes in Postgres, live updates over our SSE              |
+| G4  | Stream renders incrementally                              |                                                                                                                                                                            | Post the AI answer as one message, or stream over our SSE |
+| G5  | Hindi → English via `translateMessages`                   | Pass after enabling Translation in Console (was 28400): Hindi text to "hello, this is a question of the class." via onTranslationCompleted, identifier = messageId         | `translateTexts` for moments, cached by (momentId, lang)  |
+| G6  | ChatUI mounts and renders the `mg-moment` bubble          |                                                                                                                                                                            | Custom React list; ChatUI only for DMs                    |
 
 Overall go for Day 3 = G0–G3 pass.
+
+Also learned on Nov 2: `translateMessages` accepts a custom `MG:Moment` messageId when `text` is supplied (accepted, code 0, result via `onTranslationCompleted`), so Day 12 can translate moments with Nexconn directly.
 
 ## Decisions (do not re-litigate without a reason)
 
@@ -96,4 +120,4 @@ Overall go for Day 3 = G0–G3 pass.
 ## Open issues
 
 - Live Day 2 run (G0–G6) waits on the Nexconn keys.
-- Plan risks 1–6 above need decisions before Day 14.
+- Confirm the Nexconn plan bills $0 (see the plan section above).

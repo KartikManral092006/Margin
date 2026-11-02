@@ -38,7 +38,7 @@ Supported browsers:
 
 More facts about credentials:
 
-- Each app has separate **development** and **production** App Keys, and their data is isolated. Users, tokens and channels made with the dev key do not exist under the prod key (`/callsdk-web.md`).
+- **Correction (Nov 2):** `/chatsdk-web.md` says "Each app has one App Key. Use the same App Key throughout development, testing, and release." The earlier dev/prod split came from `/callsdk-web.md` and does not apply here. Get the App Key, App Secret and data center from Console > Key Management (`https://console.nexconn.ai/agile/apps/km`).
 - Refreshing the App Secret in the Console **invalidates every issued token** (`/platform-chat-api/user/register.md`). Do not rotate it mid-hackathon.
 
 ## 3. Server REST API
