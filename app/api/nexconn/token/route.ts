@@ -7,7 +7,7 @@ import { getChatToken } from "@/features/nexconn/server/tokens";
 import { decideTokenIdentity, tokenRequestSchema } from "@/features/nexconn/shared/token-request";
 import { db } from "@/lib/db";
 import { consumeRate } from "@/lib/rate-limit.server";
-import { checkSameOriginJson } from "@/lib/request-guard";
+import { checkSameOriginJson, readJsonBody, TOO_LARGE } from "@/lib/request-guard";
 
 const noStore = { "Cache-Control": "no-store" };
 const REFRESH_LIMIT = { window: 600, max: 5 };
@@ -19,7 +19,11 @@ export async function POST(request: Request) {
     return Response.json({ error: guard.reason }, { status: guard.status, headers: noStore });
   }
 
-  const parsed = tokenRequestSchema.safeParse(await request.json().catch(() => null));
+  const raw = await readJsonBody(request);
+  if (raw === TOO_LARGE) {
+    return Response.json({ error: "body_too_large" }, { status: 413, headers: noStore });
+  }
+  const parsed = tokenRequestSchema.safeParse(raw);
   if (!parsed.success) {
     return Response.json({ error: "invalid_body" }, { status: 400, headers: noStore });
   }

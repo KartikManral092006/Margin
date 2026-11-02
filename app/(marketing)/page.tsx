@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { Suspense } from "react";
-import { PasteError, PasteForm } from "@/features/lectures/components/paste-form";
+import { PasteError } from "@/features/lectures/components/paste-error";
+import { PasteForm } from "@/features/lectures/components/paste-form";
 
-export default function LandingPage() {
+export default function LandingPage({ searchParams }: PageProps<"/">) {
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center gap-8 px-4 py-16">
       <div className="space-y-4">
@@ -17,8 +18,9 @@ export default function LandingPage() {
       </div>
       <div className="space-y-2">
         <PasteForm />
+        {/* Dynamic hole: the rest of the page stays prerendered. */}
         <Suspense fallback={null}>
-          <PasteError />
+          <PasteError searchParams={searchParams} />
         </Suspense>
       </div>
       <p className="text-sm text-muted-foreground">

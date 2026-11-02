@@ -1,14 +1,14 @@
 "use client";
 
-import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { roomErrorMessage } from "@/features/lectures/shared/messages";
 import { parseYouTubeUrl } from "@/features/lectures/shared/youtube";
 
-// A plain GET form to /open, so it also works before hydration and without JS.
-export function PasteForm({ autoFocus = false }: { autoFocus?: boolean }) {
+// A plain GET form to /open, so it also works before hydration and without JS. `from` tells
+// /open where to send an invalid link back to; the page renders that error on the server.
+export function PasteForm({ autoFocus = false, from }: { autoFocus?: boolean; from?: "home" }) {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -40,6 +40,7 @@ export function PasteForm({ autoFocus = false }: { autoFocus?: boolean }) {
       className="flex flex-col gap-2"
       aria-label="Open a lecture room"
     >
+      {from ? <input type="hidden" name="from" value={from} /> : null}
       <div className="flex flex-col gap-2 sm:flex-row">
         <label htmlFor="lecture-url" className="sr-only">
           YouTube lecture link
@@ -67,16 +68,5 @@ export function PasteForm({ autoFocus = false }: { autoFocus?: boolean }) {
         {error}
       </p>
     </form>
-  );
-}
-
-// Shows ?error= set by /open when the form was submitted without JS. Needs a Suspense boundary.
-export function PasteError() {
-  const message = roomErrorMessage(useSearchParams().get("error"));
-  if (!message) return null;
-  return (
-    <p role="alert" className="text-sm text-destructive">
-      {message}
-    </p>
   );
 }

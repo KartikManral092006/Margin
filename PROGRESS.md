@@ -9,7 +9,7 @@ Read this first at the start of every session. Update it at the end of every day
 | 1   | Sun Nov 1 | Scaffold     | Done locally; CI pending first push                               |
 | 2   | Mon Nov 2 | Nexconn test | Go: G0, G2, G3, G5 pass, G1 likely; G4 and G6 not yet recorded    |
 | 3   | Mon Nov 2 | Auth         | Done locally (built a day early); Google and email need your keys |
-| 4   | Mon Nov 2 | Rooms        | Done (built two days early); review findings pending              |
+| 4   | Mon Nov 2 | Rooms        | Done (built two days early); review fixes applied                 |
 
 ## Nexconn plan and remaining risks (updated Nov 2)
 
@@ -125,7 +125,7 @@ Verified: format, lint, typecheck, 129 unit tests, production build without secr
 Not done (needs you):
 
 1. **Google OAuth client** (Google Cloud Console > Credentials > OAuth client ID > Web application). Authorized JavaScript origin `http://localhost:3000`; redirect URI `http://localhost:3000/api/auth/callback/google`. Put the values in `AUTH_GOOGLE_ID` and `AUTH_GOOGLE_SECRET`. While the consent screen is in "Testing", only listed test users can sign in; publish it before launch.
-2. **Email**: Resend account (Free: 100/day, 3,000/month). Resend only delivers to your own address until you verify a domain you own, e.g. a free one from the GitHub Student Developer Pack, with a subdomain such as `mail.<domain>`. Then set `EMAIL_API_KEY` and `EMAIL_FROM=login@mail.<domain>`. Start this early; DNS takes time.
+2. **Email**: done Nov 2. Resend domain `mail.joinmargin.tech` verified (receiving off); `EMAIL_FROM=login@mail.joinmargin.tech`; a test send to `delivered@resend.dev` was accepted. Domain `joinmargin.tech` will also be the production URL (Day 14). Original notes: Resend account (Free: 100/day, 3,000/month). Resend only delivers to your own address until you verify a domain you own, e.g. a free one from the GitHub Student Developer Pack, with a subdomain such as `mail.<domain>`. Then set `EMAIL_API_KEY` and `EMAIL_FROM=login@mail.<domain>`. Start this early; DNS takes time.
 3. Test Google sign-in and Google ↔ magic-link sign-in on the same email (account linking) once keys exist.
 
 ## Day 4: rooms (built Nov 2)
@@ -146,7 +146,7 @@ Verified: format, lint, typecheck, 278 unit tests, integration test (20 concurre
 
 Not done:
 
-1. Independent review (3 reviewers + skeptics) was still running at commit time; confirmed fixes follow in a separate commit.
+1. Review (3 reviewers + skeptics, Nov 2): 8 confirmed and fixed in `day-04: review fixes`: per-user Nexconn group budget (5/day) plus a per-room Redis lock (parallel `/chat` calls spent the global 200/day); per-user preview limit on `/lectures/new` and a global oEmbed cap (120/min); room lists show only rooms you joined (an unlisted YouTube video would otherwise be listed for everyone until the Data API gives `privacyStatus`); 8 KB JSON body cap (`readJsonBody`); YouTube loader and player readiness timeouts (15 s, then "Try again" really reloads); seek before ready is queued; paste errors rendered on the server so they show without JS. Rejected: 3 (quota spent before validation, integration test skipping in CI).
 2. One live Nexconn check of `/chat` (1 group create, 2 joins, 2 extra registered users, no MAU) before Day 5. Needs your OK.
 3. YouTube Data API key for the Made-for-Kids check (YouTube developer policy), duration and privacy status. Needs your decision before launch; the 30-day title refresh job also lands before launch.
 

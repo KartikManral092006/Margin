@@ -17,6 +17,7 @@ import {
   SYSTEM_USER_NAME,
 } from "@/features/nexconn/shared/config";
 import { NEXCONN_ID_RE } from "@/features/nexconn/shared/ids";
+import { readJsonBody, TOO_LARGE } from "@/lib/request-guard";
 import {
   encodeContent,
   MG,
@@ -157,7 +158,9 @@ export async function POST(request: Request) {
   const rejection = devRouteRejection(request);
   if (rejection) return rejection;
 
-  const parsed = actionSchema.safeParse(await request.json().catch(() => null));
+  const raw = await readJsonBody(request, 65_536);
+  if (raw === TOO_LARGE) return Response.json({ error: "body_too_large" }, { status: 413 });
+  const parsed = actionSchema.safeParse(raw);
   if (!parsed.success) {
     return Response.json({ error: "invalid_body", issues: parsed.error.issues }, { status: 400 });
   }

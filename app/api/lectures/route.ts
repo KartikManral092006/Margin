@@ -1,13 +1,13 @@
 import { connection, type NextRequest } from "next/server";
 import { json, rateLimited, requireUser } from "@/features/lectures/server/http";
 import { openDeps } from "@/features/lectures/server";
-import { listPublicLectures, toSummary } from "@/features/lectures/server/lectures";
+import { listJoinedLectures, toSummary } from "@/features/lectures/server/lectures";
 import { openPublicLecture } from "@/features/lectures/server/open";
 import { listLecturesQuery, openLectureBody } from "@/features/lectures/shared/schemas";
 import { parseYouTubeUrl } from "@/features/lectures/shared/youtube";
 import { db } from "@/lib/db";
 import { consumeRate } from "@/lib/rate-limit.server";
-import { checkSameOriginJson } from "@/lib/request-guard";
+import { checkSameOriginJson, readJsonBody, TOO_LARGE } from "@/lib/request-guard";
 
 export async function GET(request: NextRequest) {
   await connection();
@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
   const query = listLecturesQuery.safeParse(Object.fromEntries(request.nextUrl.searchParams));
   if (!query.success) return json({ error: "invalid_query" }, 400);
 
-  const lectures = await listPublicLectures(db, query.data);
+  const lectures = await listJoinedLectures(db, auth.user.id, query.data);
   return json({ lectures: lectures.map(toSummary) });
 }
 
@@ -35,7 +35,9 @@ export async function POST(request: Request) {
   const limit = await consumeRate(`lec:open:${auth.user.id}`, { window: 600, max: 30 });
   if (!limit.allowed) return rateLimited(limit);
 
-  const body = openLectureBody.safeParse(await request.json().catch(() => null));
+  const raw = await readJsonBody(request);
+  if (raw === TOO_LARGE) return json({ error: "body_too_large" }, 413);
+  const body = openLectureBody.safeParse(raw);
   if (!body.success) return json({ error: "invalid_body" }, 400);
   if (body.data.visibility === "private")
     return json({ error: "private_rooms_not_available" }, 422);

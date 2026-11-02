@@ -18,7 +18,9 @@ export async function GET(request: NextRequest) {
       : parseYouTubeUrl(params.get("url"));
 
   const to = (path: string) => NextResponse.redirect(new URL(path, request.url));
-  if (!parsed) return to("/?error=invalid_url");
+  // Fixed targets only: `from` never becomes part of a URL.
+  if (!parsed)
+    return to(params.get("from") === "home" ? "/home?error=invalid_url" : "/?error=invalid_url");
 
   const t = parsed.startSec ? `t=${parsed.startSec}` : "";
   const user = await getSessionUserFromHeaders(request.headers).catch(() => null);

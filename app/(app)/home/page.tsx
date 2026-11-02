@@ -3,8 +3,9 @@ import { connection } from "next/server";
 import { SignOutButton } from "@/features/auth/components/sign-out-button";
 import { verifySession } from "@/features/auth/server/session";
 import { LectureList } from "@/features/lectures/components/lecture-list";
+import { PasteError } from "@/features/lectures/components/paste-error";
 import { PasteForm } from "@/features/lectures/components/paste-form";
-import { listPublicLectures, toSummary } from "@/features/lectures/server/lectures";
+import { listJoinedLectures, toSummary } from "@/features/lectures/server/lectures";
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
 
@@ -15,13 +16,10 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export default async function HomePage() {
+export default async function HomePage({ searchParams }: PageProps<"/home">) {
   await connection();
   const user = await verifySession("/home");
-  const [recent, popular] = await Promise.all([
-    listPublicLectures(db, { sort: "recent" }, 10),
-    listPublicLectures(db, { sort: "popular" }, 10),
-  ]);
+  const rooms = await listJoinedLectures(db, user.id, { sort: "recent" }, 10);
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-4 py-10">
@@ -40,17 +38,15 @@ export default async function HomePage() {
 
       <section className="space-y-2">
         <h2 className="text-base font-semibold">Open a lecture</h2>
-        <PasteForm />
+        <PasteForm from="home" />
+        <PasteError searchParams={searchParams} />
       </section>
 
       <LectureList
-        title="Recent rooms"
-        lectures={recent.map(toSummary)}
-        empty="No rooms yet. Paste a lecture link to open the first one."
+        title="Your rooms"
+        lectures={rooms.map(toSummary)}
+        empty="No rooms yet. Paste a lecture link to open one, or open a link a classmate shared."
       />
-      {popular.length > 0 && (
-        <LectureList title="Popular rooms" lectures={popular.map(toSummary)} empty="" />
-      )}
     </main>
   );
 }

@@ -37,6 +37,9 @@ function fakeDb(initial: { nexconnJoinedAt?: Date | null } = {}) {
       }),
     },
     lecture: {
+      findUnique: vi.fn(async () => ({
+        nexconnGroupReadyAt: state.groupReady ? new Date() : null,
+      })),
       update: vi.fn(async () => ({ memberCount: 1 })),
       findUniqueOrThrow: vi.fn(async () => ({ memberCount: 1 })),
       updateMany: vi.fn(async () => {
@@ -51,7 +54,7 @@ function fakeDb(initial: { nexconnJoinedAt?: Date | null } = {}) {
 
 function setup(
   respond: (path: string) => unknown,
-  options: { nexconnJoinedAt?: Date | null; allowCreate?: boolean } = {},
+  options: { nexconnJoinedAt?: Date | null; allowCreate?: boolean; lockFree?: boolean } = {},
 ) {
   const { db, state } = fakeDb(options);
   const order: string[] = [];
@@ -67,6 +70,8 @@ function setup(
       order.push(`token:${userId}`);
     }),
     allowGroupCreate: vi.fn(async () => options.allowCreate ?? true),
+    acquireGroupLock: vi.fn(async () => options.lockFree ?? true),
+    releaseGroupLock: vi.fn(async () => {}),
   };
   return { deps, order, state, call };
 }
@@ -130,6 +135,37 @@ describe("ensureRoomChat", () => {
       reason: "group_quota",
     });
     expect(call).not.toHaveBeenCalled();
+  });
+
+  it("charges the creating user's group budget and releases the room lock", async () => {
+    const { deps } = setup(() => ({}));
+    await ensureRoomChat(deps, lecture, user);
+    expect(deps.allowGroupCreate).toHaveBeenCalledWith(user.id);
+    expect(deps.acquireGroupLock).toHaveBeenCalledWith(lecture.id);
+    expect(deps.releaseGroupLock).toHaveBeenCalledWith(lecture.id);
+  });
+
+  it("answers busy, without spending quota, while another request creates the group", async () => {
+    const { deps, call } = setup(() => ({}), { lockFree: false });
+    await expect(ensureRoomChat(deps, lecture, user)).rejects.toMatchObject({ reason: "busy" });
+    expect(deps.allowGroupCreate).not.toHaveBeenCalled();
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it("skips creating when another request recorded the group meanwhile", async () => {
+    const { deps, order, state } = setup(() => ({}));
+    state.groupReady = true; // the row says the group exists, the passed lecture is stale
+    await expect(ensureRoomChat(deps, lecture, user)).resolves.toMatchObject({ chat: "ok" });
+    expect(order).not.toContain("/v4/group-channel/create");
+    expect(deps.allowGroupCreate).not.toHaveBeenCalled();
+  });
+
+  it("releases the lock when the budget is spent", async () => {
+    const { deps } = setup(() => ({}), { allowCreate: false });
+    await expect(ensureRoomChat(deps, lecture, user)).rejects.toMatchObject({
+      reason: "group_quota",
+    });
+    expect(deps.releaseGroupLock).toHaveBeenCalledWith(lecture.id);
   });
 
   it("passes other Nexconn errors up and records nothing", async () => {

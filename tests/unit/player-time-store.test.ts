@@ -106,6 +106,25 @@ describe("createPlayerTimeStore", () => {
     expect(store.getSnapshot().tSec).toBe(0);
   });
 
+  it("applies a seek made before the player was ready once it attaches", () => {
+    const store = createPlayerTimeStore(fakeScheduler().scheduler);
+    store.seek(90);
+    expect(store.getSnapshot().tSec).toBe(90);
+    const player = fakePlayer();
+    store.attach(player);
+    expect(player.seekTo).toHaveBeenCalledWith(90, true);
+    expect(store.getSnapshot().tSec).toBe(90);
+  });
+
+  it("forgets a pending seek when the player goes away", () => {
+    const store = createPlayerTimeStore(fakeScheduler().scheduler);
+    store.seek(90);
+    store.detach();
+    const player = fakePlayer();
+    store.attach(player);
+    expect(player.seekTo).not.toHaveBeenCalled();
+  });
+
   it("getTime reads the player directly", () => {
     const store = createPlayerTimeStore(fakeScheduler().scheduler);
     expect(store.getTime()).toBe(0);

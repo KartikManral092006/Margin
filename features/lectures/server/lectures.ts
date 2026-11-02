@@ -111,14 +111,19 @@ export async function joinLecture(
   });
 }
 
-export function listPublicLectures(
+// Only rooms the viewer joined: we can't yet tell unlisted YouTube videos from public ones
+// (needs the Data API's privacyStatus), so a global list could expose an unlisted lecture.
+// Pasting a link still opens the shared room for everyone.
+export function listJoinedLectures(
   db: PrismaClient,
+  userId: string,
   query: { q?: string; sort: ListLecturesQuery["sort"] },
   take: number = LIST_LIMIT,
 ) {
   return db.lecture.findMany({
     where: {
       visibility: Visibility.public,
+      memberships: { some: { userId } },
       ...(query.q
         ? { title: { contains: escapeLike(query.q), mode: "insensitive" as const } }
         : {}),

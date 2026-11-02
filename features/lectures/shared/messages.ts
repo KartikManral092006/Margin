@@ -4,6 +4,7 @@ const ROOM_ERRORS: Record<string, string> = {
   video_unavailable: "This video is private or can't be embedded.",
   youtube_unavailable: "YouTube didn't answer. Try again in a moment.",
   rate_limited: "You've opened a lot of new rooms today. Try again later.",
+  preview_limited: "You've looked up a lot of videos just now. Wait a few minutes and try again.",
   auth_not_configured: "Sign-in isn't configured on this server yet.",
 };
 

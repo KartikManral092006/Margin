@@ -13,6 +13,10 @@ import { redis } from "@/lib/redis";
 const META_TTL_SECONDS = 86_400;
 const META_MISS_TTL_SECONDS = 600;
 const GROUP_CREATES_PER_DAY = { window: 86_400, max: 200 };
+const GROUP_CREATES_PER_USER = { window: 86_400, max: 5 };
+const GROUP_LOCK_SECONDS = 30;
+// Shared cap on real oEmbed calls (cache misses) from every path, so no route can flood YouTube.
+const OEMBED_CALLS = { window: 60, max: 120 };
 
 function metaKey(videoId: string): string {
   return `yt:meta:v1:${videoId}`;
@@ -28,6 +32,9 @@ export async function getVideoMeta(videoId: string): Promise<MetaResult> {
     logger.warn({ err: error }, "video meta cache read failed");
   }
 
+  if (!(await consumeRate("yt:oembed:all", OEMBED_CALLS)).allowed) {
+    return { ok: false, error: "youtube_unavailable" };
+  }
   const result = await fetchYouTubeMeta(videoId);
   if (result.ok || result.error !== "youtube_unavailable") {
     try {
@@ -49,7 +56,26 @@ export function roomChatDeps(): RoomChatDeps {
     db,
     client: getNexconn(),
     registerUser: getChatToken,
-    allowGroupCreate: async () =>
+    allowGroupCreate: async (userId) =>
+      (await consumeRateStrict(`nx:group:create:u:${userId}`, GROUP_CREATES_PER_USER)).allowed &&
       (await consumeRateStrict("nx:group:create", GROUP_CREATES_PER_DAY)).allowed,
+    acquireGroupLock: async (lectureId) => {
+      try {
+        const result = await redis.set(
+          `nx:group:lock:${lectureId}`,
+          "1",
+          "EX",
+          GROUP_LOCK_SECONDS,
+          "NX",
+        );
+        return result === "OK";
+      } catch (error) {
+        logger.warn({ err: error }, "group lock unavailable");
+        return false;
+      }
+    },
+    releaseGroupLock: async (lectureId) => {
+      await redis.del(`nx:group:lock:${lectureId}`).catch(() => 0);
+    },
   };
 }

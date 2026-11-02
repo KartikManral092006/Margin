@@ -84,6 +84,8 @@ export function createPlayerTimeStore(scheduler: Scheduler = realScheduler): Pla
   let snapshot: PlayerSnapshot = INITIAL_SNAPSHOT;
   let player: PlayerAdapter | null = null;
   let timer: unknown = null;
+  // A seek requested before the player is ready (e.g. Day 6 click-to-seek), applied on attach.
+  let pendingSeek: number | null = null;
 
   // A new object only when something changed: useSyncExternalStore needs stable snapshots.
   function update(next: Partial<PlayerSnapshot>) {
@@ -129,7 +131,8 @@ export function createPlayerTimeStore(scheduler: Scheduler = realScheduler): Pla
     getTime: () => (player ? Math.max(0, player.getCurrentTime()) : snapshot.tSec),
     seek(seconds) {
       const target = Math.max(0, seconds);
-      player?.seekTo(target, true);
+      if (player) player.seekTo(target, true);
+      else pendingSeek = target;
       update({ tSec: target });
     },
     play: () => player?.playVideo(),
@@ -141,9 +144,12 @@ export function createPlayerTimeStore(scheduler: Scheduler = realScheduler): Pla
     availableRates: () => (player ? player.getAvailablePlaybackRates() : []),
     attach(next) {
       player = next;
+      const seekTo = pendingSeek;
+      pendingSeek = null;
+      if (seekTo !== null) next.seekTo(seekTo, true);
       update({
         ready: true,
-        tSec: Math.max(0, next.getCurrentTime()),
+        tSec: seekTo ?? Math.max(0, next.getCurrentTime()),
         rate: next.getPlaybackRate(),
         state: playerStateFromCode(next.getPlayerState()),
       });
@@ -151,6 +157,7 @@ export function createPlayerTimeStore(scheduler: Scheduler = realScheduler): Pla
     },
     detach() {
       player = null;
+      pendingSeek = null;
       syncTimer();
       update(INITIAL_SNAPSHOT);
     },

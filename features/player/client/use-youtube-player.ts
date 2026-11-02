@@ -9,6 +9,9 @@ import { PLAYER_ERROR, type YTPlayer } from "@/features/player/client/yt-types";
 // "https://www.youtube.com"; nothing else depends on it.
 export const PLAYER_HOST = "https://www.youtube-nocookie.com";
 
+// Covers both stalls: the API never loading and the iframe never firing onReady.
+const READY_TIMEOUT_MS = 15_000;
+
 export function useYouTubePlayer(
   wrapperRef: RefObject<HTMLDivElement | null>,
   options: {
@@ -31,6 +34,10 @@ export function useYouTubePlayer(
     const target = document.createElement("div");
     wrapper.replaceChildren(target);
 
+    const readyTimer = window.setTimeout(() => {
+      if (!cancelled && !store.getSnapshot().ready) reportError(PLAYER_ERROR.LOADER_FAILED);
+    }, READY_TIMEOUT_MS);
+
     loadYouTubeIframeApi().then(
       (YT) => {
         if (cancelled) return;
@@ -47,7 +54,10 @@ export function useYouTubePlayer(
           },
           events: {
             // Player methods exist only after onReady.
-            onReady: (event) => store.attach(event.target),
+            onReady: (event) => {
+              window.clearTimeout(readyTimer);
+              store.attach(event.target);
+            },
             onStateChange: (event) => store.onState(event.data),
             onPlaybackRateChange: (event) => store.onRate(event.data),
             onError: (event) => reportError(event.data),
@@ -61,6 +71,7 @@ export function useYouTubePlayer(
 
     return () => {
       cancelled = true;
+      window.clearTimeout(readyTimer);
       store.detach();
       player?.destroy();
       wrapper.replaceChildren();

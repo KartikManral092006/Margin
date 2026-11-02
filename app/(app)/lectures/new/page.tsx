@@ -11,6 +11,9 @@ import { findPublicByYoutubeId } from "@/features/lectures/server/lectures";
 import { roomErrorMessage } from "@/features/lectures/shared/messages";
 import { parseStartSec, thumbnailUrl, YOUTUBE_ID_RE } from "@/features/lectures/shared/youtube";
 import { db } from "@/lib/db";
+import { consumeRate } from "@/lib/rate-limit.server";
+
+const PREVIEWS_PER_USER = { window: 600, max: 30 };
 
 export const instant = false;
 
@@ -32,12 +35,15 @@ export default async function NewLecturePage({ searchParams }: PageProps<"/lectu
   const startSec = parseStartSec(first(params.t));
   const query = `v=${videoId}${startSec ? `&t=${startSec}` : ""}`;
 
-  await verifySession(`/lectures/new?${query}`);
+  const user = await verifySession(`/lectures/new?${query}`);
 
   const existing = await findPublicByYoutubeId(db, videoId);
   if (existing) redirect(`/lectures/${existing.id}${startSec ? `?t=${startSec}` : ""}`);
 
-  const meta = await getVideoMeta(videoId);
+  const preview = await consumeRate(`lec:preview:${user.id}`, PREVIEWS_PER_USER);
+  const meta = preview.allowed
+    ? await getVideoMeta(videoId)
+    : ({ ok: false, error: "preview_limited" } as const);
 
   return (
     <main className="flex flex-1 items-center justify-center px-4 py-10">

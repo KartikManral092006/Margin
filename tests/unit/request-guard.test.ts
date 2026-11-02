@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkSameOriginJson } from "@/lib/request-guard";
+import { checkSameOriginJson, readJsonBody, TOO_LARGE } from "@/lib/request-guard";
 
 function request(headers: Record<string, string>) {
   return new Request("http://localhost:3000/api/x", { method: "POST", headers });
@@ -42,5 +42,25 @@ describe("checkSameOriginJson", () => {
     expect(
       checkSameOriginJson(request({ host: "localhost:3000", "content-type": "text/plain" })),
     ).toMatchObject({ ok: false, status: 415 });
+  });
+});
+
+describe("readJsonBody", () => {
+  const post = (body: string, headers: Record<string, string> = {}) =>
+    new Request("http://localhost:3000/api/x", { method: "POST", body, headers });
+
+  it("parses a small JSON body", async () => {
+    await expect(readJsonBody(post('{"a":1}'))).resolves.toEqual({ a: 1 });
+  });
+
+  it("returns null for invalid JSON", async () => {
+    await expect(readJsonBody(post("{nope"))).resolves.toBeNull();
+  });
+
+  it("refuses a body larger than the limit, by header or by bytes read", async () => {
+    await expect(
+      readJsonBody(post("x".repeat(20), { "content-length": "99999" }), 16),
+    ).resolves.toBe(TOO_LARGE);
+    await expect(readJsonBody(post(`"${"x".repeat(100)}"`), 16)).resolves.toBe(TOO_LARGE);
   });
 });
