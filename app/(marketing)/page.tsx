@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -29,7 +30,12 @@ export default function LandingPage() {
           Open room
         </Button>
       </form>
-      <p className="text-sm text-muted-foreground">Lecture rooms are coming soon.</p>
+      <p className="text-sm text-muted-foreground">
+        Lecture rooms are coming soon.{" "}
+        <Link href="/sign-in" className="font-medium text-foreground underline underline-offset-4">
+          Sign in
+        </Link>
+      </p>
     </main>
   );
 }

@@ -12,7 +12,11 @@ import {
 } from "@/features/nexconn/client/engine";
 import { SEEK_EVENT, type SeekEventDetail } from "@/features/nexconn/client/moment-element";
 import { ClientCode } from "@/features/nexconn/shared/codes";
-import { DEV_LECTURE_CHANNEL_ID } from "@/features/nexconn/shared/config";
+import {
+  DEV_LECTURE_CHANNEL_ID,
+  DEV_TEST_USERS,
+  type DevTestUser,
+} from "@/features/nexconn/shared/config";
 import {
   decodeContent,
   MG,
@@ -20,7 +24,6 @@ import {
   type MomentPayload,
 } from "@/features/nexconn/shared/messages";
 
-const DEV_USERS = ["devalice", "devbob"] as const;
 const HINDI_SAMPLE = "नमस्ते, यह कक्षा का एक प्रश्न है";
 const LOG_LIMIT = 200;
 const STATUS_LABELS: Record<number, string> = {
@@ -67,7 +70,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 }
 
 export function NexconnLab() {
-  const [userId, setUserId] = useState<string>(DEV_USERS[0]);
+  const [userId, setUserId] = useState<DevTestUser>(DEV_TEST_USERS[0]);
   const [session, setSession] = useState<NexconnSession | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [status, setStatus] = useState<number | null>(null);
@@ -172,7 +175,7 @@ export function NexconnLab() {
   async function connect() {
     setConnecting(true);
     try {
-      setSession(await startNexconn({ userId, name: userId, withChatUI: true }));
+      setSession(await startNexconn({ devUser: userId, withChatUI: true }));
     } catch (error) {
       log(
         "connect:error",
@@ -310,7 +313,7 @@ export function NexconnLab() {
         <div className="space-y-4">
           <Section title="G0 · Identity and connection">
             <div className="flex flex-wrap gap-2">
-              {DEV_USERS.map((id) => (
+              {DEV_TEST_USERS.map((id) => (
                 <Button
                   key={id}
                   variant={userId === id ? "default" : "outline"}
@@ -330,7 +333,7 @@ export function NexconnLab() {
                 variant="outline"
                 disabled={busy !== null}
                 onClick={() =>
-                  run("setup", () => devAction({ action: "setup", userIds: [...DEV_USERS] }))
+                  run("setup", () => devAction({ action: "setup", userIds: [...DEV_TEST_USERS] }))
                 }
               >
                 Setup dev group

@@ -68,3 +68,32 @@ describe("clientEnvSchema", () => {
     expect(Object.keys(parsed)).toEqual(["NEXT_PUBLIC_APP_URL"]);
   });
 });
+
+describe("auth settings", () => {
+  it("accepts auth keys left empty (CI builds without them)", () => {
+    const env = parseServerEnv({ ...valid, AUTH_GOOGLE_ID: "", AUTH_GOOGLE_SECRET: "" });
+    expect(env.AUTH_GOOGLE_ID).toBeUndefined();
+  });
+
+  it("rejects a Google client ID without its secret", () => {
+    expect(() => parseServerEnv({ ...valid, AUTH_GOOGLE_ID: "id" })).toThrow(/AUTH_GOOGLE_SECRET/);
+  });
+
+  it("rejects an email API key without a sender address", () => {
+    expect(() => parseServerEnv({ ...valid, EMAIL_API_KEY: "re_x" })).toThrow(/EMAIL_FROM/);
+  });
+});
+
+describe("client IP settings", () => {
+  it("splits trusted proxies and checks the header name", () => {
+    const env = parseServerEnv({
+      ...valid,
+      AUTH_IP_HEADER: "fly-client-ip",
+      AUTH_TRUSTED_PROXIES: "10.0.0.0/8, 172.16.0.0/12",
+    });
+    expect(env.AUTH_TRUSTED_PROXIES).toEqual(["10.0.0.0/8", "172.16.0.0/12"]);
+    expect(() => parseServerEnv({ ...valid, AUTH_IP_HEADER: "X Forwarded" })).toThrow(
+      /AUTH_IP_HEADER/,
+    );
+  });
+});

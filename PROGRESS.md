@@ -4,10 +4,11 @@ Read this first at the start of every session. Update it at the end of every day
 
 ## Status
 
-| Day | Date      | Work         | Status                                                              |
-| --- | --------- | ------------ | ------------------------------------------------------------------- |
-| 1   | Sun Nov 1 | Scaffold     | Done locally; CI pending first push                                 |
-| 2   | Mon Nov 2 | Nexconn test | Code done (built early on Nov 1); live two-browser run pending keys |
+| Day | Date      | Work         | Status                                                            |
+| --- | --------- | ------------ | ----------------------------------------------------------------- |
+| 1   | Sun Nov 1 | Scaffold     | Done locally; CI pending first push                               |
+| 2   | Mon Nov 2 | Nexconn test | Go: G0, G2, G3, G5 pass, G1 likely; G4 and G6 not yet recorded    |
+| 3   | Mon Nov 2 | Auth         | Done locally (built a day early); Google and email need your keys |
 
 ## Nexconn plan and remaining risks (updated Nov 2)
 
@@ -71,7 +72,7 @@ Done:
 - `features/nexconn/shared/`: area hosts, ID rules (letters and digits only), `MG:*` schemas, content and metadata encoding, error codes.
 - `features/nexconn/client/`: `engine.ts` (dynamic import of the SDKs, one-time initialize, handlers to an event bus, token refresh on `31004`), ChatUI registration with an `mg-moment` custom element (shadow DOM, emits `mg-seek`).
 - Routes: `POST /api/nexconn/token`, `POST /api/dev/nexconn` (setup, moment, metadata, momentUpdate, stream), page `/dev/nexconn` (the lab).
-- Dev gates: `NODE_ENV !== "production"` **and** `NEXCONN_DEV_ROUTES=1`, enforced in `proxy.ts` (real 404 for `/dev/*`), the page, and both API routes. The API routes also reject cross-site and non-JSON requests (`lib/request-guard.ts`), and `pnpm dev` listens on 127.0.0.1 only, so other devices on the Wi-Fi cannot reach it. `.env.example` ships `NEXCONN_DEV_ROUTES=0`; set it to 1 in your own `.env`.
+- Dev gates: `NODE_ENV !== "production"` **and** `NEXCONN_DEV_ROUTES=1`, enforced in `proxy.ts` (real 404 for `/dev/*`), the page, and both API routes. The API routes also reject cross-site and non-JSON requests (`lib/request-guard.ts`), and `pnpm dev` listens on loopback only (`-H localhost` since Day 3), so other devices on the Wi-Fi cannot reach it. `.env.example` ships `NEXCONN_DEV_ROUTES=0`; set it to 1 in your own `.env`.
 - Review: 3 reviewers (SDK correctness, security, Next/React) plus a verifier per finding. 4 confirmed and fixed: failover race on concurrent failures, LAN exposure of dev routes, cross-site POSTs to dev routes, engine state lost on Fast Refresh.
 - Tests: signer, REST client (failover, errors, signing), API wrappers, message helpers, IDs, env.
 
@@ -80,7 +81,7 @@ Verified locally without keys: lint, typecheck, unit tests, build; `/dev/*`, tok
 ### How to run the live test (needs your keys; uses a small amount of quota)
 
 1. Nexconn Console > Key Management (console.nexconn.ai/agile/apps/km): copy the App Key and App Secret into `.env` (`NEXCONN_APP_KEY`, `NEXCONN_APP_SECRET`), set `NEXCONN_AREA` to the app's data center (SG, NA or SA), enable Translation.
-2. `pnpm db:up && pnpm dev`, open `http://127.0.0.1:3000/dev/nexconn` in Chrome (devalice) and in an incognito window (devbob).
+2. `pnpm db:up && pnpm dev`, open `http://localhost:3000/dev/nexconn` in Chrome (devalice) and in an incognito window (devbob).
 3. Both: pick the user, **Connect**. One of them: **Setup dev group**.
 4. Run G1–G6 in order (client moment, server moment, upvote server then browser, stream, Hindi text then translate, ChatUI). Copy each event log here.
 
@@ -102,6 +103,30 @@ Overall go for Day 3 = G0–G3 pass.
 
 Also learned on Nov 2: `translateMessages` accepts a custom `MG:Moment` messageId when `text` is supplied (accepted, code 0, result via `onTranslationCompleted`), so Day 12 can translate moments with Nexconn directly.
 
+## Day 3: auth (built Nov 2)
+
+Done:
+
+- **Better Auth 1.7.14**, not Auth.js. The plan put Auth.js v5 first; it was checked and dropped. Its README and discussion #13252 say it is now maintained by the Better Auth team for security fixes only and recommend Better Auth for new projects, v5 is still `beta.32` (last release Jul 20), and `@auth/prisma-adapter` is typed against `@prisma/client`, which doesn't resolve with Prisma 7's `prisma-client` generator. Pinned to 1.7.14 because pnpm's `minimumReleaseAge` (1 day) blocks 1.7.15, published Nov 1; none of 1.7.15's fixes touch the features we use. Don't add release-age exclusions.
+- Migration `0002_auth`: `users`, `sessions`, `accounts`, `verifications` (Better Auth's core schema). `User` gains `emailVerified` and `updatedAt`; `nexconnUserId` is nullable (Better Auth's runtime schema check expects that) but always set (see decisions).
+- `features/auth/server/auth.ts`: lazy `getAuth()` (so CI builds without `AUTH_SECRET`), Prisma adapter, magic link (10 min, single use, stored hashed), Google (only when both keys are set), 30-day DB sessions, telemetry off, rate limits stored in Redis, client IP from `AUTH_IP_HEADER` / `AUTH_TRUSTED_PROXIES`.
+- Pages: `/sign-in` (magic link + Google, loading/sent/error states), `/sign-in/confirm` (the emailed link lands here; one click spends the token), `/home` (protected; shows the user, sign-out), `app/error.tsx` (branded error page with retry). Sign-out is a server-action form that works without JS.
+- `proxy.ts`: optimistic cookie check for `/home/*` (307 to `/sign-in?callbackURL=…`); every page re-checks with `verifySession`. The `/dev` guard is unchanged.
+- Email: `features/email/server/resend.ts` (fetch, 5 s timeout, idempotency key, one retry only when retryable). Without `EMAIL_API_KEY`, development logs the link to the terminal; production refuses (503 `EMAIL_NOT_CONFIGURED`).
+- Limits (Redis): 3 links per address per 15 min, 10 per IP per day (only when the IP is known), 90 per day in total (Resend Free allows 100), Better Auth per-IP rules raised for a class behind one campus NAT (60/min Google, 30/min magic link, 60/min verify), 5 Nexconn token refreshes per user per 10 min.
+- `POST /api/nexconn/token` now issues tokens for the **signed-in user** (401 otherwise); the body can't name a user. The lab sends `{devUser}`, accepted only when dev routes are enabled.
+- CI secret scan now builds with **sentinel values** and greps for those values in `.next/static` and the prerendered HTML/RSC shells. The old name-based grep failed on Better Auth's client env helper, which contains the string `AUTH_SECRET` but never a value.
+- `pnpm dev` now runs `next dev -H localhost` (was `127.0.0.1`): cookies and Better Auth's origin check need one host, and Google OAuth accepts `localhost`.
+- Review: 3 reviewers (security, Better Auth/Next correctness, regressions) plus a skeptic per finding. 12 of 13 findings confirmed and fixed: open redirect through dot segments (`/.//evil.com`), session cookie never refreshed (fixed with `SessionRefresher`, refresh off in Server Components), class-sized NAT rate limits, one client spending the daily email cap, client IP config, magic-link login CSRF and link scanners (confirm page + same-origin check on verify), CI scan scope, localhost vs 127.0.0.1, Google 429 message, "use Google" shown when Google is off, Google button stuck after Back (bfcache), no error page. Rejected: reserved display names (names are not a trust boundary; bot messages must be recognised by sender ID, never by name).
+
+Verified: format, lint, typecheck, 129 unit tests, production build without secrets, sentinel scan with a positive control. Live (dev, no Google or email keys): signed-out `/home` redirects; link request, confirm page, sign-in; cookie HttpOnly + SameSite=Lax; `id = nexconnUserId`; link reuse gives `INVALID_TOKEN`; scanner or cross-site hits on verify don't spend the token; open-redirect attempts go to `/home`; forged cookie redirects without a loop; cross-site POST 403; token route 401/400; sign-out form clears cookies and the session row; 4th link for one address 429. In headless Chrome at 375 px: the sign-in form sends a link, `/home` refreshes the session, and a Postgres outage shows the Margin error page.
+
+Not done (needs you):
+
+1. **Google OAuth client** (Google Cloud Console > Credentials > OAuth client ID > Web application). Authorized JavaScript origin `http://localhost:3000`; redirect URI `http://localhost:3000/api/auth/callback/google`. Put the values in `AUTH_GOOGLE_ID` and `AUTH_GOOGLE_SECRET`. While the consent screen is in "Testing", only listed test users can sign in; publish it before launch.
+2. **Email**: Resend account (Free: 100/day, 3,000/month). Resend only delivers to your own address until you verify a domain you own, e.g. a free one from the GitHub Student Developer Pack, with a subdomain such as `mail.<domain>`. Then set `EMAIL_API_KEY` and `EMAIL_FROM=login@mail.<domain>`. Start this early; DNS takes time.
+3. Test Google sign-in and Google ↔ magic-link sign-in on the same email (account linking) once keys exist.
+
 ## Decisions (do not re-litigate without a reason)
 
 - Next 16: route guards go in `proxy.ts` (not `middleware.ts`); `next lint` is gone, use `pnpm lint`.
@@ -116,8 +141,19 @@ Also learned on Nov 2: `translateMessages` accepts a custom `MG:Moment` messageI
 - YouTube playback rate only takes 0.25 steps; drift correction uses 1.25× / 0.75× for a computed duration.
 - Schema fixes to apply when the tables land: `Moment.pinnedAt/pinnedBy`; separate `LectureMembership` and `CourseMembership`; partial unique indexes (public `youtubeId`, one active party) and the HNSW index as raw-SQL migrations; vote count updated in the same transaction as the vote.
 - Embedding model must be chosen before Day 11 (it fixes the `vector(N)` size).
+- Auth is Better Auth (see Day 3). Env names stay `AUTH_*`; never set `BETTER_AUTH_SECRET` or `BETTER_AUTH_URL` (Better Auth reads them as fallbacks).
+- User IDs are 32 letters and digits, set in `user.create.before`, and `nexconnUserId = id` in the same INSERT. Registration with Nexconn happens on the first token request, not at sign-up: sign-in never depends on Nexconn, and only people who open chat count toward Nexconn MAU. ("Nexconn user created on first sign-in" in the plan now means "ID reserved at sign-up, registered on first connect".)
+- `proxy.ts` only checks that the session cookie exists. Every protected page calls `verifySession`, every route and action reads the session itself. Never redirect `/sign-in` away in the proxy (a stale cookie would loop).
+- Server Components read sessions with refresh off (they can't set cookies); `SessionRefresher` in `app/(app)/layout.tsx` refreshes through the route handler.
+- Every redirect target from user input goes through `safeCallbackPath` (checked after URL parsing).
+- Magic links land on `/sign-in/confirm`; the verify endpoint only accepts same-origin navigations.
+- Before launch: set `AUTH_IP_HEADER` (or `AUTH_TRUSTED_PROXIES`) for the chosen host, otherwise per-IP limits put all users in one bucket. Check it on staging with a forged `X-Forwarded-For`.
+- pnpm's 1-day `minimumReleaseAge` stays on; pin an older version instead of adding exclusions.
+- The project lives in `~/Desktop`, which is synced to iCloud with "Optimize Mac Storage". On Nov 2 iCloud had evicted ~25,000 files in `node_modules` and 118 source/`.git` files, so reads hung (`prisma` never started). Fix used: `brctl download` for source files, delete and reinstall `node_modules`. Long-term fix: move the repo out of Desktop/Documents (e.g. `~/code/margin`).
 
 ## Open issues
 
-- Live Day 2 run (G0–G6) waits on the Nexconn keys.
+- Day 2: record G4 (stream) and G6 (ChatUI) results; confirm G1's senderUserId.
+- Day 3: Google keys, Resend domain, then test Google sign-in and account linking (see Day 3 "Not done").
+- Push to GitHub and get a first green CI run (needs the repo URL and your OK).
 - Confirm the Nexconn plan bills $0 (see the plan section above).

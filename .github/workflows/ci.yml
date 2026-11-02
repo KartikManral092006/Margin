@@ -73,15 +73,31 @@ jobs:
       - name: Apply migrations
         run: pnpm db:deploy
 
+      # Build with sentinel secret values, then look for those values in the client bundle.
+      # Matching values, not variable names: libraries (e.g. Better Auth's env helper) ship
+      # names like AUTH_SECRET in browser code without ever reading a value there.
       - name: Build
         run: pnpm build
         env:
           NODE_ENV: production
+          AUTH_SECRET: ci-sentinel-auth-secret-7f3a9c2e5b8d1f40
+          AUTH_GOOGLE_ID: ci-sentinel-google-id-61c8e2
+          AUTH_GOOGLE_SECRET: ci-sentinel-google-secret-4d9b7a
+          EMAIL_API_KEY: ci-sentinel-email-key-2e7f5c
+          EMAIL_FROM: sentinel@ci.invalid
+          NEXCONN_APP_KEY: ci-sentinel-nexconn-key-8a1d3f
+          NEXCONN_APP_SECRET: ci-sentinel-nexconn-secret-5c0e9b
+          AI_API_KEY: ci-sentinel-ai-key-3b6f1e
 
-      - name: Scan client bundle for secrets
+      # Covers the browser bundle and the prerendered HTML/RSC shells served to every visitor.
+      # Request-time (dynamic) output is out of scope for a build-time scan.
+      - name: Scan client output for secrets
         run: |
-          if grep -rlE 'NEXCONN_APP_SECRET|AUTH_SECRET|AUTH_GOOGLE_SECRET|EMAIL_API_KEY|AI_API_KEY|DATABASE_URL|REDIS_URL|postgres(ql)?://|rediss?://' .next/static; then
-            echo "::error::Server-only values found in the client bundle"
+          pattern='ci-sentinel-(auth-secret|google-secret|email-key|nexconn-secret|ai-key)|margin:margin@|postgres(ql)?://|rediss?://'
+          leaks=$( { grep -rlE "$pattern" .next/static; find .next/server/app -type f \( -name '*.html' -o -name '*.rsc' -o -name '*.body' -o -name '*.meta' \) -exec grep -lE "$pattern" {} +; } || true )
+          if [ -n "$leaks" ]; then
+            echo "$leaks"
+            echo "::error::Server-only values found in client output"
             exit 1
           fi
-          echo "No server-only values in .next/static"
+          echo "No server-only values in client output"

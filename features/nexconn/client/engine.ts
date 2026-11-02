@@ -3,7 +3,7 @@ import type { NCChatUIApplication } from "@nexconn/chatui";
 import { devHooks } from "@/features/nexconn/client/dev-hooks";
 import { chatUIRegistrations, MG_REGISTRATIONS } from "@/features/nexconn/client/registrations";
 import { ClientCode } from "@/features/nexconn/shared/codes";
-import type { NexconnArea } from "@/features/nexconn/shared/config";
+import type { DevTestUser, NexconnArea } from "@/features/nexconn/shared/config";
 
 export type ChatModule = typeof NexconnChat;
 export type ChatMessage = NexconnChat.Message<Record<string, unknown>>;
@@ -71,11 +71,14 @@ export class NexconnConnectError extends Error {
   }
 }
 
-async function fetchToken(userId: string, name: string, refresh: boolean): Promise<TokenResponse> {
+// Without devUser the server issues the token for the signed-in user.
+type TokenIdentity = { devUser?: DevTestUser };
+
+async function fetchToken(identity: TokenIdentity, refresh: boolean): Promise<TokenResponse> {
   const response = await fetch("/api/nexconn/token", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ userId, name, refresh }),
+    body: JSON.stringify({ ...identity, refresh }),
   });
   if (!response.ok) {
     throw new Error(`Token request failed (${response.status}): ${await response.text()}`);
@@ -175,34 +178,29 @@ async function initEngine(token: TokenResponse, withChatUI: boolean): Promise<En
   return store.engine;
 }
 
-async function connect(options: {
-  userId: string;
-  name: string;
-  withChatUI: boolean;
-}): Promise<NexconnSession> {
-  const token = await fetchToken(options.userId, options.name, false);
+type StartOptions = TokenIdentity & { withChatUI: boolean };
+
+async function connect(options: StartOptions): Promise<NexconnSession> {
+  const identity: TokenIdentity = options.devUser ? { devUser: options.devUser } : {};
+  const token = await fetchToken(identity, false);
   const { chat, chatui } = await initEngine(token, options.withChatUI);
 
   let result = await chat.NCEngine.connect({ token: token.accessToken });
   if (result.code === ClientCode.TokenInvalid) {
     nexconnEvents.emit("tokenRefresh", { reason: result.code });
-    const fresh = await fetchToken(options.userId, options.name, true);
+    const fresh = await fetchToken(identity, true);
     result = await chat.NCEngine.connect({ token: fresh.accessToken });
   }
   if (!result.isOk) {
     throw new NexconnConnectError(result.code, result.msg ?? "Nexconn connect failed");
   }
 
-  const userId = result.data?.userId ?? options.userId;
+  const userId = result.data?.userId ?? token.userId;
   nexconnEvents.emit("connected", { userId });
   return { chat, chatui, userId };
 }
 
-export function startNexconn(options: {
-  userId: string;
-  name: string;
-  withChatUI: boolean;
-}): Promise<NexconnSession> {
+export function startNexconn(options: StartOptions): Promise<NexconnSession> {
   if (typeof window === "undefined") {
     return Promise.reject(new Error("Nexconn can only start in the browser"));
   }

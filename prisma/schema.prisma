@@ -6,3 +6,70 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+// Auth tables follow Better Auth 1.7.15's core schema. The Prisma adapter reaches them as
+// prisma.user, prisma.session, ... and checks them at runtime, so keep these models and the
+// additionalFields in features/auth/server/auth.ts in step.
+
+model User {
+  id            String    @id // set in the user.create.before hook: 32 letters and digits
+  name          String // "" for magic-link sign-ups until a profile step exists
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  image         String?
+  nexconnUserId String?   @unique // equals id; written in the same INSERT
+  language      String    @default("en")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  sessions      Session[]
+  accounts      Account[]
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("accounts")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verifications")
+}

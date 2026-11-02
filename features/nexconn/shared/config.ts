@@ -7,5 +7,10 @@ export const NEXCONN_AREAS = {
 export type NexconnArea = keyof typeof NEXCONN_AREAS;
 
 export const DEV_LECTURE_CHANNEL_ID = "devlecture1";
+// Test identities for the /dev/nexconn lab. The token route accepts them only when dev
+// routes are enabled. marginbot is server-only and never gets a token.
+export const DEV_TEST_USERS = ["devalice", "devbob"] as const;
+export type DevTestUser = (typeof DEV_TEST_USERS)[number];
+
 export const SYSTEM_USER_ID = "marginbot";
 export const SYSTEM_USER_NAME = "Margin";
