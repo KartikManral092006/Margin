@@ -28,6 +28,8 @@ model User {
 
   lecturesCreated    Lecture[]
   lectureMemberships LectureMembership[]
+  moments            Moment[]           @relation("MomentAuthor")
+  pinnedMoments      Moment[]           @relation("MomentPinnedBy")
 
   @@map("users")
 }
@@ -106,6 +108,7 @@ model Lecture {
   createdAt           DateTime            @default(now())
   updatedAt           DateTime            @updatedAt
   memberships         LectureMembership[]
+  moments             Moment[]
 
   // Never findUnique/upsert/update/delete by youtubeId: Prisma drops the predicate and can
   // return a private row. Use findFirst({ where: { youtubeId, visibility: "public" } }).
@@ -127,4 +130,45 @@ model LectureMembership {
   @@id([lectureId, userId])
   @@index([userId, joinedAt(sort: Desc)])
   @@map("lecture_memberships")
+}
+
+enum MomentStatus {
+  open
+  resolved
+}
+
+enum SendStatus {
+  pending
+  sent
+  failed
+}
+
+model Moment {
+  id               String       @id // 32 letters and digits
+  lectureId        String
+  userId           String? // null once the author's account is deleted
+  clientId         String // the browser's temporary ID; makes a retried POST idempotent
+  tSec             Int // whole seconds into the video
+  body             String
+  parentId         String? // replies (threads land on Day 6)
+  status           MomentStatus @default(open)
+  upvotes          Int          @default(0)
+  pinnedAt         DateTime?
+  pinnedById       String?
+  nexconnMessageId String?
+  sendStatus       SendStatus   @default(pending) // Postgres is the truth; Nexconn is the live signal
+  sendAttempts     Int          @default(0)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  lecture          Lecture      @relation(fields: [lectureId], references: [id], onDelete: Cascade)
+  user             User?        @relation("MomentAuthor", fields: [userId], references: [id], onDelete: SetNull)
+  pinnedBy         User?        @relation("MomentPinnedBy", fields: [pinnedById], references: [id], onDelete: SetNull)
+  parent           Moment?      @relation("MomentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies          Moment[]     @relation("MomentReplies")
+
+  @@unique([userId, clientId])
+  @@index([lectureId, tSec])
+  @@index([parentId])
+  @@index([lectureId, sendStatus])
+  @@map("moments")
 }

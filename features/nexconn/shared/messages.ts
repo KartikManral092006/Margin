@@ -19,6 +19,14 @@ export const momentSchema = z.object({
   parentId: z.string().nullable(),
 });
 
+// What the server sends to a lecture room (from marginbot): enough to show the doubt at once.
+// A superset of momentSchema, so older decoders (the Day 2 lab) still read it.
+export const roomMomentSchema = momentSchema.extend({
+  authorName: z.string().min(1).max(64),
+  clientId: z.string().max(64).nullable(),
+  createdAt: z.string().max(40),
+});
+
 export const momentStatusSchema = z.enum(["open", "resolved"]);
 
 export const momentUpdateSchema = z.object({
@@ -35,6 +43,7 @@ export const syncSchema = z.object({
 });
 
 export type MomentPayload = z.infer<typeof momentSchema>;
+export type RoomMomentPayload = z.infer<typeof roomMomentSchema>;
 export type MomentUpdatePayload = z.infer<typeof momentUpdateSchema>;
 export type SyncPayload = z.infer<typeof syncSchema>;
 

@@ -1,10 +1,11 @@
-import { connection, type NextRequest } from "next/server";
+import { after, connection, type NextRequest } from "next/server";
 import { nexconnDisplayName } from "@/features/auth/shared/display-name";
 import { json, rateLimited, requireUser } from "@/features/lectures/server/http";
 import { roomChatDeps } from "@/features/lectures/server";
 import { getLectureForViewer } from "@/features/lectures/server/lectures";
 import { ChatUnavailableError, ensureRoomChat } from "@/features/lectures/server/room-chat";
 import { LECTURE_ID_RE } from "@/features/lectures/shared/schemas";
+import { resendMomentSignals } from "@/features/moments/server";
 import { NexconnNotConfiguredError } from "@/features/nexconn/server";
 import { NexconnApiError } from "@/features/nexconn/server/client";
 import { db } from "@/lib/db";
@@ -40,6 +41,14 @@ export async function POST(request: NextRequest, ctx: RouteContext<"/api/lecture
       nexconnUserId,
       name: nexconnDisplayName({ name: auth.user.name, nexconnUserId }),
     });
+    // Doubts posted before the group existed get their live signal now.
+    if (result.chat === "ok") {
+      after(() =>
+        resendMomentSignals(id).catch((error: unknown) =>
+          logger.warn({ err: error, lectureId: id }, "moment resend failed"),
+        ),
+      );
+    }
     return json(result);
   } catch (error) {
     if (error instanceof NexconnNotConfiguredError) {

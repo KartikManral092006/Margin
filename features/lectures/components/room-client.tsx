@@ -9,6 +9,7 @@ import { YouTubePlayer } from "@/features/player/components/youtube-player";
 import { formatClock } from "@/features/player/shared/format";
 import type { LectureSummary } from "@/features/lectures/shared/schemas";
 import { canonicalWatchUrl } from "@/features/lectures/shared/youtube";
+import { MomentsPanel } from "@/features/moments/components/moments-panel";
 
 type RoomContextValue = { lecture: LectureSummary; store: PlayerTimeStore };
 
@@ -173,10 +174,11 @@ export function RoomClient({
               You&apos;re the first one here. Share the link with your class.
             </p>
           )}
-          <p className="text-sm text-muted-foreground">
-            Doubts pinned to the second arrive next. For now, watch and share the room.
-          </p>
         </section>
+
+        <div className="px-4 sm:px-0">
+          <MomentsPanel lectureId={lecture.id} store={store} />
+        </div>
       </main>
     </RoomContext.Provider>
   );

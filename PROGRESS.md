@@ -10,6 +10,7 @@ Read this first at the start of every session. Update it at the end of every day
 | 2   | Mon Nov 2 | Nexconn test | Go: G0, G2, G3, G5 pass, G1 likely; G4 and G6 not yet recorded    |
 | 3   | Mon Nov 2 | Auth         | Done locally (built a day early); Google and email need your keys |
 | 4   | Mon Nov 2 | Rooms        | Done (built two days early); review fixes applied                 |
+| 5   | Mon Nov 2 | Moments      | Done (built three days early); live Nexconn delivery 0.8-0.9 s    |
 
 ## Nexconn plan and remaining risks (updated Nov 2)
 
@@ -150,6 +151,24 @@ Not done:
 2. One live Nexconn check of `/chat` (1 group create, 2 joins, 2 extra registered users, no MAU) before Day 5. Needs your OK.
 3. YouTube Data API key for the Made-for-Kids check (YouTube developer policy), duration and privacy status. Needs your decision before launch; the 30-day title refresh job also lands before launch.
 
+## Day 5: moments (built Nov 2)
+
+Done:
+
+- Migration `0004_moments`: `moments` (tSec in whole seconds, body, parentId for replies one level deep, status, upvotes, pinnedAt/pinnedBy, `clientId` with a unique `(userId, clientId)` so a retried POST is idempotent, `sendStatus` pending/sent/failed + `sendAttempts` + `nexconnMessageId`).
+- `GET /api/lectures/[id]/moments?from=&to=` (window up to 30 min) or `?ids=`; `POST` (session, same-origin JSON, 8 KB body, 10 posts/min/user, auto-joins the room, body normalized and capped at 1,000 characters).
+- Delivery: **Postgres first**. After the response (`next/server` `after`), the server sends `MG:Moment` to the room's group **as marginbot**, carrying the whole doubt (author name, clientId, createdAt; a superset of the Day 2 schema). Browsers accept `MG:Moment` only from marginbot, so a member sending a fake one from their own client is ignored. Failed or skipped sends (no group yet) are resent after the next post and as soon as `/chat` creates or joins the group; 3 attempts max.
+- Room UI (`features/moments/`): **D** (or the "Ask at 12:34" button) opens the composer with the time captured when it opens; Enter posts, Shift+Enter new line, Esc closes. The list is placed by second, highlights doubts within 10 s of the playhead, and clicking a time seeks. Optimistic add with rollback on 4xx and retry on network errors. The list covers 15 minutes around the playhead and reloads when you move 5 minutes (Day 6's "jump to 30:00 loads that window" works already). Status shows "Live" or "Updating every few seconds" (5 s polling without Nexconn, a 30 s safety refresh while live).
+- The room joins chat on mount, so a room's Nexconn group is now created on its first visit (still once per room, within the Day 4 per-user and global group budgets).
+- `pnpm dev` now deletes `.next` before starting. Turbopack's dev cache went stale three times today after the server was stopped and files were regenerated (Prisma client, route types), and every page then reloaded itself forever (HMR `restart` on connect).
+
+Verified: format, lint, typecheck, 344 unit tests, 8 integration tests (10 concurrent identical posts give 1 row; reply rules; window bounds; resend rules), drift check 0, production build with the sentinel secret scan clean. Offline (Nexconn and email off): two accounts, B sees A's doubt by polling in 4.2 s at the right second; idempotent retry, validation errors, auto-join. **Live over Nexconn** (approved; the two test accounts were mapped to the existing `devalice`/`devbob` identities, so no new Nexconn users or MAU): B saw A's doubt in **812 ms and 915 ms** after A pressed Enter. Slower runs came from this network: a TCP connect to `api.sg-light-api.com` sometimes takes 7.6 s (measured), and the first send after a server restart timed out once; those doubts still arrive through the resend and refresh paths.
+
+Not done:
+
+1. Clicking a doubt's time before the video has started showed 0:00 in two headless runs (0:55 in another); investigate with Day 6's click-to-seek.
+2. The Nexconn group `lec…` created for the deleted test room still exists in Nexconn (harmless).
+
 ## Decisions (do not re-litigate without a reason)
 
 - Next 16: route guards go in `proxy.ts` (not `middleware.ts`); `next lint` is gone, use `pnpm lint`.
@@ -176,6 +195,8 @@ Not done:
 - Rooms work from Postgres alone. Nexconn group create and join happen lazily in `POST /api/lectures/[id]/chat`, never on page view or join. A public room's creator is a `member`; `host` is for private class rooms (deferred, with Course/Unit/CourseMembership).
 - With streaming metadata, a page-level `redirect()`/`notFound()` returns HTTP 200 and acts in client JS for normal browsers (curl gets a real 307/404). Redirects that must work without JS live in `proxy.ts`, route handlers or server actions.
 - Dev reload loop (Nov 2): every page reloaded itself continuously. Fixed by deleting `.next` and restoring iCloud-evicted files; don't share `.next` between `pnpm build` and `pnpm dev` runs.
+- Room moments are sent by marginbot, never by the author, and clients ignore `MG:Moment` from anyone else. Postgres is the truth; the signal is for speed.
+- The working copy is `~/code/Margin` (outside iCloud). `~/Desktop/Margin` is stale and holds the local `backup-before-rewrite` branch.
 - pnpm's 1-day `minimumReleaseAge` stays on; pin an older version instead of adding exclusions.
 - The project lives in `~/Desktop`, which is synced to iCloud with "Optimize Mac Storage". On Nov 2 iCloud had evicted ~25,000 files in `node_modules` and 118 source/`.git` files, so reads hung (`prisma` never started). Fix used: `brctl download` for source files, delete and reinstall `node_modules`. Long-term fix: move the repo out of Desktop/Documents (e.g. `~/code/margin`).
 
