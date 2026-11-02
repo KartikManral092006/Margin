@@ -13,11 +13,19 @@ function timeOf(ms: number): string {
 export function ChatPanel({
   lectureId,
   channelId,
+  kind = "group",
+  canSend = true,
+  label = "Room chat",
+  placeholder = "Message the room",
 }: {
   lectureId: string;
   channelId: string | null;
+  kind?: "group" | "open";
+  canSend?: boolean;
+  label?: string;
+  placeholder?: string;
 }) {
-  const { lines, names, ready, error, send } = useRoomChat(lectureId, channelId);
+  const { lines, names, ready, error, send } = useRoomChat(lectureId, channelId, kind);
   const [draft, setDraft] = useState("");
   const listRef = useRef<HTMLOListElement>(null);
   const length = Array.from(draft.trim()).length;
@@ -44,7 +52,7 @@ export function ChatPanel({
   }
 
   return (
-    <section className="flex flex-col gap-3" aria-label="Room chat">
+    <section className="flex flex-col gap-3" aria-label={label}>
       {!ready ? (
         <div className="space-y-2" aria-label="Loading chat">
           <Skeleton className="h-8 w-3/4" />
@@ -92,19 +100,24 @@ export function ChatPanel({
           submit();
         }}
       >
-        <label htmlFor="chat-input" className="sr-only">
-          Message the room
+        <label htmlFor={`chat-input-${kind}`} className="sr-only">
+          {placeholder}
         </label>
         <input
-          id="chat-input"
+          id={`chat-input-${kind}`}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           maxLength={CHAT_MAX_CHARS * 2}
-          placeholder="Message the room"
+          placeholder={canSend ? placeholder : "Connecting…"}
+          disabled={!canSend}
           autoComplete="off"
           className="h-11 min-w-0 flex-1 rounded-md border bg-background px-3 text-base sm:text-sm"
         />
-        <Button type="submit" className="h-11" disabled={length === 0 || length > CHAT_MAX_CHARS}>
+        <Button
+          type="submit"
+          className="h-11"
+          disabled={!canSend || length === 0 || length > CHAT_MAX_CHARS}
+        >
           Send
         </Button>
       </form>

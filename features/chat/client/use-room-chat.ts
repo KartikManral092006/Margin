@@ -12,9 +12,14 @@ import {
 const HISTORY_SIZE = 30;
 const NAMES_DEBOUNCE_MS = 200;
 
-// Room chat over the lecture's Nexconn group: plain text sent from the browser, the last 30
-// messages loaded from Nexconn's history, new ones from the live connection.
-export function useRoomChat(lectureId: string, channelId: string | null) {
+// Chat over a Nexconn channel: the lecture's group (room chat; the last 30 messages come from
+// Nexconn's history) or a watch party's open channel (no history: the last messages arrive
+// when the party hook enters the channel, so this subscribes first).
+export function useRoomChat(
+  lectureId: string,
+  channelId: string | null,
+  kind: "group" | "open" = "group",
+) {
   const [lines, setLines] = useState<ChatLine[]>([]);
   const [names, setNames] = useState<Record<string, string>>({});
   const [ready, setReady] = useState(false);
@@ -67,6 +72,10 @@ export function useRoomChat(lectureId: string, channelId: string | null) {
       try {
         const session = await startNexconn({ withChatUI: false });
         selfIdRef.current = session.userId;
+        if (kind === "open") {
+          if (!cancelled) setReady(true);
+          return;
+        }
         const { chat } = session;
         const query = chat.BaseChannel.createMessagesQuery({
           channelIdentifier: new chat.GroupChannelIdentifier(channelId),
@@ -91,7 +100,7 @@ export function useRoomChat(lectureId: string, channelId: string | null) {
       cancelled = true;
       unsubscribe();
     };
-  }, [channelId, requestNames]);
+  }, [channelId, kind, requestNames]);
 
   const send = useCallback(
     async (raw: string) => {
@@ -110,9 +119,9 @@ export function useRoomChat(lectureId: string, channelId: string | null) {
       setLines((current) => mergeChat(current, [optimistic]));
       try {
         const { chat } = await startNexconn({ withChatUI: false });
-        const result = await new chat.GroupChannel(channelId).sendMessage(
-          new chat.SendTextMessageParams({ text }),
-        );
+        const channel =
+          kind === "open" ? new chat.OpenChannel(channelId) : new chat.GroupChannel(channelId);
+        const result = await channel.sendMessage(new chat.SendTextMessageParams({ text }));
         if (!result.isOk || !result.data) throw new Error(`send failed: ${result.code}`);
         const sent = result.data;
         setLines((current) =>
@@ -127,7 +136,7 @@ export function useRoomChat(lectureId: string, channelId: string | null) {
         );
       }
     },
-    [channelId],
+    [channelId, kind],
   );
 
   return { lines, names, ready, error, send };

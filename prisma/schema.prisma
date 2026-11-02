@@ -30,6 +30,7 @@ model User {
   lectureMemberships LectureMembership[]
   moments            Moment[]           @relation("MomentAuthor")
   votes              Vote[]
+  hostedParties      WatchParty[]
   pinnedMoments      Moment[]           @relation("MomentPinnedBy")
 
   @@map("users")
@@ -110,6 +111,7 @@ model Lecture {
   updatedAt           DateTime            @updatedAt
   memberships         LectureMembership[]
   moments             Moment[]
+  parties             WatchParty[]
 
   // Never findUnique/upsert/update/delete by youtubeId: Prisma drops the predicate and can
   // return a private row. Use findFirst({ where: { youtubeId, visibility: "public" } }).
@@ -186,4 +188,20 @@ model Vote {
   @@id([momentId, userId])
   @@index([userId])
   @@map("votes")
+}
+
+// A host-led synced viewing of a lecture. At most one active (endedAt null) party per lecture.
+model WatchParty {
+  id                   String    @id // 32 letters and digits
+  lectureId            String
+  hostId               String
+  nexconnOpenChannelId String    @unique // "pty" + id
+  startedAt            DateTime  @default(now())
+  endedAt              DateTime?
+  lecture              Lecture   @relation(fields: [lectureId], references: [id], onDelete: Cascade)
+  host                 User      @relation(fields: [hostId], references: [id], onDelete: Cascade)
+
+  @@unique([lectureId], map: "watch_parties_one_active_key", where: { endedAt: null })
+  @@index([lectureId, startedAt(sort: Desc)])
+  @@map("watch_parties")
 }

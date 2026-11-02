@@ -4,15 +4,16 @@ Read this first at the start of every session. Update it at the end of every day
 
 ## Status
 
-| Day | Date      | Work         | Status                                                                  |
-| --- | --------- | ------------ | ----------------------------------------------------------------------- |
-| 1   | Sun Nov 1 | Scaffold     | Done locally; CI pending first push                                     |
-| 2   | Mon Nov 2 | Nexconn test | Go: G0, G2, G3, G5 pass, G1 likely; G4 and G6 not yet recorded          |
-| 3   | Mon Nov 2 | Auth         | Done locally (built a day early); Google and email need your keys       |
-| 4   | Mon Nov 2 | Rooms        | Done (built two days early); review fixes applied                       |
-| 5   | Mon Nov 2 | Moments      | Done (built three days early); live Nexconn delivery 0.8-0.9 s          |
-| 6   | Mon Nov 2 | Threads      | Done (built four days early); jump to 30:00 loads in 130 ms             |
-| 7   | Mon Nov 2 | P0           | **P0 reached**: presence, room chat, phone polish, Playwright E2E green |
+| Day | Date      | Work         | Status                                                                     |
+| --- | --------- | ------------ | -------------------------------------------------------------------------- |
+| 1   | Sun Nov 1 | Scaffold     | Done locally; CI pending first push                                        |
+| 2   | Mon Nov 2 | Nexconn test | Go: G0, G2, G3, G5 pass, G1 likely; G4 and G6 not yet recorded             |
+| 3   | Mon Nov 2 | Auth         | Done locally (built a day early); Google and email need your keys          |
+| 4   | Mon Nov 2 | Rooms        | Done (built two days early); review fixes applied                          |
+| 5   | Mon Nov 2 | Moments      | Done (built three days early); live Nexconn delivery 0.8-0.9 s             |
+| 6   | Mon Nov 2 | Threads      | Done (built four days early); jump to 30:00 loads in 130 ms                |
+| 7   | Mon Nov 2 | P0           | **P0 reached**: presence, room chat, phone polish, Playwright E2E green    |
+| 8   | Mon Nov 2 | Watch party  | Done (six days early); live drift ≤ 0.45 s, events reach viewers in ~0.4 s |
 
 ## Nexconn plan and remaining risks (updated Nov 2)
 
@@ -38,7 +39,7 @@ Most are in Console > Chat > Chat Settings (console.nexconn.ai/agile/im/service/
 | Day 2  | Group Channels             | Enable pre-join history access by new member             | Enable                                     |
 | Always | Key Management             | App Secret                                               | Never reset (invalidates all tokens)       |
 | Day 7  | Users (if present)         | Online status subscription                               | Enable if a switch exists                  |
-| Day 8  | Open Channels              | Open channel metadata (KV)                               | Enable                                     |
+| Day 8  | Open Channels              | Open channel metadata (KV)                               | Not needed (party state is in Redis)       |
 | Day 8  | Open Channels              | Restrict messaging to joined participants                | Enable                                     |
 | Day 8  | Open Channels              | Allow participation in multiple channels                 | Leave off                                  |
 | Day 13 | Security & Moderation      | Moderate messages sent by server API                     | Enable                                     |
@@ -207,6 +208,34 @@ Not done:
 1. Subagents still stall (four probes hit the 600 s watchdog), so Days 5-7 have had no independent review. Run one when they work.
 2. Going live takes 15-25 s on this network (slow connections to Nexconn's Singapore API); rooms poll every 5 s meanwhile.
 
+## Day 8: watch party (built Nov 2)
+
+Done:
+
+- **Server clock** (`GET /api/time`, `features/party/client/server-clock.ts`): every party time is a server time. A client takes 5 samples and keeps the estimate with the smallest round trip (error at most half of it); in a party it re-measures every 30 s and only replaces the estimate with a better (or 10-minute-old) one, so a busy moment can't spoil a good reading. The host sends live messages only when its estimate is good to about a second.
+- **Party model** (migration 0006): `WatchParty`, one active party per lecture (partial unique index `WHERE endedAt IS NULL`; 10 simultaneous "Start" clicks give one party). The host's latest state lives in Redis (`party:state:{id}`, 10-minute TTL). A party ends when the host ends it, when the host has been silent for 2 minutes, or after 4 hours; a host runs one party at a time (starting one ends their others). Ending clears the state and closes the Nexconn open channel. A Redis error never counts as "host silent".
+- **Host** broadcasts `{action, tSec, playing, rate, hostSentAt}` on play, pause, speed change and any jump over 1.5 s, plus a heartbeat every 5 s: `MG:Sync` on the party's open channel (`pty` + party id) and a POST to `/api/lectures/[id]/party/state` (host only; a clock more than 5 s off is replaced by the server's receive time). The server creates the open channel after the start (3 tries; "already exists" counts as done); the host's browser retries entering 8 times and asks the server to create it again after 3.
+- **Viewers** follow `MG:Sync` from the host's Nexconn id only (states stamped more than 5 s in the future are ignored), stepping every second at the host's speed: drift under 0.5 s does nothing, 0.5-2 s plays 0.25x faster or slower for |drift| / 0.25 s, over 2 s (or a catch-up speed YouTube doesn't have) seeks. A seek while playing aims ahead by the player's loading time, learned from where earlier seeks landed; for 4 s after a seek only a new host jump seeks again, unless the player has visibly landed (without this a long jump became a seek loop). A paused host pauses everyone at the same spot; nobody is followed past the end of the video. Viewers poll the saved state every 2 s whenever no live message has arrived for 7.5 s. Joining is per party: when a party ends, nobody is moved into the next one.
+- **UI**: a "Party" tab ("Party ●" while one runs) and a banner for parties you haven't joined; the host sees "You're hosting"; viewers see "Following Ana · In sync (+0.1 s)" or "Catching up"; party chat is the room chat component on the open channel (`kind="open"`).
+- **Review**: the first independent review that ran (workflow: 3 reviewers + adversarial verification, 19 agents) confirmed 15 issues; all fixed above (host speed ignored, a Redis blip ending parties, viewers trusting a silent channel, follower reset on connect, states leaking between parties, dead party on Start, channel never retried, one user holding a lecture's slot, ended videos restarting).
+- **Test identities (decision)**: the live check uses only devalice (host) and devbob (viewer). The second viewer is covered by the offline browser run and the simulation, so no new Nexconn user is created (Console active users are the traction proof).
+
+Verified:
+
+- Unit (party): 10-minute simulation of a host and two viewers (one on a slow, jittery network; every seek stalls 0.3-1.2 s; rate changes lag) at 1x (5 seeds), 1.5x and 2x (3 seeds each): both viewers within 1 s of the host outside the 6 s after a pause, play or jump. Follower tests: one seek while YouTube loads, a new host jump seeks at once, host speed, end of video.
+- Integration: 10 concurrent starts give one party; ending is idempotent; a new party can start; starting a party ends the host's other one.
+- Browser, offline (3 headless Chromes: host, 375 px phone, desktop; Nexconn off, so viewers poll; 10 minutes with a pause at 2:00, a resume, a jump to 7:00, 1.5x at 5:30 and 1x at 7:30): max drift 0.44 s and 0.46 s, mean 0.3 s, no sample at 1 s or more. Viewers follow a pause, play or jump in 2.6-3.2 s (2 s poll + 1 s step); after a speed change they take the new speed in about 3 s, then spend 4 s at ±0.25x closing the distance the host covered meanwhile.
+- Browser, live over Nexconn (devalice host, devbob viewer on a 375 px phone), same 10-minute script: both entered the open channel; the viewer followed the pause in 407 ms, play 618 ms, the jump 321 ms, the speed changes 409-411 ms; max drift 0.32 s, mean 0.13 s, no sample at 1 s or more; a party chat message arrived in 414 ms. Two more 200 s runs: every event followed in 0.3-1.0 s, max drift 0.34 s and 0.45 s, chat 325-415 ms.
+- One live run before the review fixes had the viewer miss a pause and drift (its full log wasn't kept). Two confirmed review findings fit it (viewers trusting a silent channel; the follower reset when the channel connects); after the fixes, four live runs in a row were clean.
+- E2E: new `tests/e2e/watch-party.spec.ts` (host starts, a viewer on a phone joins from the banner and follows play, pause and a jump to 30:00 within 1 s; ending lets the viewer go). Suite 3/3, twice in a row.
+- Format, lint, typecheck, 405 unit tests, 19 integration tests, migration drift 0, production build and secret scan clean. Lint now ignores `.next-e2e/` (the E2E server's build output failed lint whenever it was present).
+
+Not done:
+
+1. Days 5-7 still have had no independent review. Workflows run now (each agent stalls once and is retried), so run one.
+2. Console: "Restrict messaging to joined participants" (Open Channels) is Kartik's to switch on. Open-channel metadata isn't needed (state is in Redis).
+3. A user can still start a party on a lecture and keep it alive with heartbeats for up to 4 hours (one per account). Moderation tools come on Day 13.
+
 ## Decisions (do not re-litigate without a reason)
 
 - Next 16: route guards go in `proxy.ts` (not `middleware.ts`); `next lint` is gone, use `pnpm lint`.
@@ -218,6 +247,9 @@ Not done:
 - All `MG:*` types are registered in one call (ChatUI forwards it to `NCEngine.registerCustomMessages`).
 - Hosting must be a long-running container (SSE presence and Redis need open connections). No serverless.
 - Watch-party sync uses a server clock offset (`GET /api/time`, NTP-style), never raw `Date.now()` across machines.
+- Watch-party state lives in Redis (saved by the host's POST), not open-channel KV. `MG:Sync` is the fast path only: viewers poll the saved state whenever no live message has arrived for 7.5 s.
+- The host's playback rate is part of the party state; viewers play at it and correct at ±0.25x around it.
+- One active party per lecture, one per host, at most 4 hours. Live party checks use devalice (host) and devbob (viewer) only; a second viewer is covered offline and in simulation.
 - YouTube playback rate only takes 0.25 steps; drift correction uses 1.25× / 0.75× for a computed duration.
 - Schema fixes to apply when the tables land: `Moment.pinnedAt/pinnedBy`; separate `LectureMembership` and `CourseMembership`; partial unique indexes through Prisma's native `partialIndexes` preview feature (a hand-written SQL index gets dropped by the next `migrate dev`; test the HNSW index the same way before Day 11); vote count updated in the same transaction as the vote.
 - Embedding model must be chosen before Day 11 (it fixes the `vector(N)` size).

@@ -15,6 +15,8 @@ import { TimelineMarkers } from "@/features/moments/components/timeline-markers"
 import { ChatPanel } from "@/features/chat/components/chat-panel";
 import { usePresence } from "@/features/presence/client/use-presence";
 import { PresenceLine } from "@/features/presence/components/presence-line";
+import { useParty } from "@/features/party/client/use-party";
+import { PartyBanner, PartyPanel } from "@/features/party/components/party-panel";
 
 type RoomContextValue = { lecture: LectureSummary; store: PlayerTimeStore };
 
@@ -56,9 +58,16 @@ export function RoomClient({
   startSec: number | null;
 }) {
   const [store] = useState(() => createPlayerTimeStore());
+
+  // Development only: lets the browser tests drive and read the player (watch-party sync runs).
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
+    (window as unknown as { __marginPlayer?: PlayerTimeStore }).__marginPlayer = store;
+  }, [store]);
   const moments = useRoomMoments(lecture.id, store);
   const presence = usePresence(lecture.id, store);
-  const [tab, setTab] = useState<"doubts" | "chat">("doubts");
+  const party = useParty(lecture.id, store, moments.status === "live");
+  const [tab, setTab] = useState<"doubts" | "chat" | "party">("doubts");
   const showDoubts = useCallback(() => setTab("doubts"), []);
   const [memberCount, setMemberCount] = useState(lecture.memberCount);
   const [joinState, setJoinState] = useState<JoinState>("joining");
@@ -190,11 +199,19 @@ export function RoomClient({
         </section>
 
         <div className="flex flex-col gap-3 px-4 sm:px-0">
+          <PartyBanner
+            party={party}
+            onOpen={() => {
+              setTab("party");
+              void party.join();
+            }}
+          />
           <div role="tablist" aria-label="Room" className="flex gap-1 rounded-lg bg-muted p-1">
             {(
               [
                 ["doubts", "Doubts"],
                 ["chat", "Room chat"],
+                ["party", party.party ? "Party ●" : "Watch party"],
               ] as const
             ).map(([value, label]) => (
               <button
@@ -224,6 +241,14 @@ export function RoomClient({
           </div>
           <div role="tabpanel" id="panel-chat" aria-labelledby="tab-chat" hidden={tab !== "chat"}>
             <ChatPanel lectureId={lecture.id} channelId={moments.chatChannelId} />
+          </div>
+          <div
+            role="tabpanel"
+            id="panel-party"
+            aria-labelledby="tab-party"
+            hidden={tab !== "party"}
+          >
+            <PartyPanel lectureId={lecture.id} party={party} />
           </div>
         </div>
       </main>
