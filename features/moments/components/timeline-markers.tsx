@@ -59,9 +59,13 @@ export function TimelineMarkers({
           );
         })}
       </div>
-      {buckets.length === 0 && (
-        <p className="mt-1 text-xs text-muted-foreground">No doubts in this lecture yet.</p>
-      )}
+      <div className="mt-1 flex justify-between text-[11px] text-muted-foreground tabular-nums">
+        <span>0:00</span>
+        <span>
+          {buckets.length === 0 ? "No doubts in this lecture yet" : "Doubts across the lecture"}
+        </span>
+        <span>{formatClock(duration)}</span>
+      </div>
     </div>
   );
 }

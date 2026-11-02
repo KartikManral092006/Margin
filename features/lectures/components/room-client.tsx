@@ -12,6 +12,9 @@ import { canonicalWatchUrl } from "@/features/lectures/shared/youtube";
 import { useRoomMoments } from "@/features/moments/client/use-room-moments";
 import { MomentsPanel } from "@/features/moments/components/moments-panel";
 import { TimelineMarkers } from "@/features/moments/components/timeline-markers";
+import { ChatPanel } from "@/features/chat/components/chat-panel";
+import { usePresence } from "@/features/presence/client/use-presence";
+import { PresenceLine } from "@/features/presence/components/presence-line";
 
 type RoomContextValue = { lecture: LectureSummary; store: PlayerTimeStore };
 
@@ -54,6 +57,9 @@ export function RoomClient({
 }) {
   const [store] = useState(() => createPlayerTimeStore());
   const moments = useRoomMoments(lecture.id, store);
+  const presence = usePresence(lecture.id, store);
+  const [tab, setTab] = useState<"doubts" | "chat">("doubts");
+  const showDoubts = useCallback(() => setTab("doubts"), []);
   const [memberCount, setMemberCount] = useState(lecture.memberCount);
   const [joinState, setJoinState] = useState<JoinState>("joining");
   const [playerError, setPlayerError] = useState<number | null>(null);
@@ -159,6 +165,8 @@ export function RoomClient({
             </Button>
           </div>
 
+          <PresenceLine snapshot={presence} store={store} />
+
           {joinState === "failed" && (
             <p className="text-sm text-muted-foreground">
               Couldn&apos;t join this room.{" "}
@@ -181,8 +189,42 @@ export function RoomClient({
           )}
         </section>
 
-        <div className="px-4 sm:px-0">
-          <MomentsPanel moments={moments} store={store} />
+        <div className="flex flex-col gap-3 px-4 sm:px-0">
+          <div role="tablist" aria-label="Room" className="flex gap-1 rounded-lg bg-muted p-1">
+            {(
+              [
+                ["doubts", "Doubts"],
+                ["chat", "Room chat"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                role="tab"
+                id={`tab-${value}`}
+                aria-selected={tab === value}
+                aria-controls={`panel-${value}`}
+                onClick={() => setTab(value)}
+                className={`h-9 flex-1 rounded-md text-sm font-medium ${
+                  tab === value ? "bg-background shadow-sm" : "text-muted-foreground"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {/* Both stay mounted so the D shortcut, live updates and chat history survive switching. */}
+          <div
+            role="tabpanel"
+            id="panel-doubts"
+            aria-labelledby="tab-doubts"
+            hidden={tab !== "doubts"}
+          >
+            <MomentsPanel moments={moments} store={store} onComposerOpen={showDoubts} />
+          </div>
+          <div role="tabpanel" id="panel-chat" aria-labelledby="tab-chat" hidden={tab !== "chat"}>
+            <ChatPanel lectureId={lecture.id} channelId={moments.chatChannelId} />
+          </div>
         </div>
       </main>
     </RoomContext.Provider>

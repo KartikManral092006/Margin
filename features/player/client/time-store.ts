@@ -121,15 +121,20 @@ export function createPlayerTimeStore(
     return Number.isFinite(value) && value > 0 ? value : null;
   }
 
+  // The player's time, except right after a seek, while YouTube may still report the old one.
+  function currentTime(source: PlayerAdapter): number {
+    const reported = Math.max(0, source.getCurrentTime());
+    if (!lastSeek) return reported;
+    if (now() - lastSeek.at >= SEEK_SETTLE_MS) {
+      lastSeek = null;
+      return reported;
+    }
+    return Math.abs(reported - lastSeek.target) > 2 ? lastSeek.target : reported;
+  }
+
   function poll() {
     if (!player) return;
-    let tSec = Math.max(0, player.getCurrentTime());
-    if (lastSeek) {
-      const settling = now() - lastSeek.at < SEEK_SETTLE_MS;
-      if (settling && Math.abs(tSec - lastSeek.target) > 2) tSec = lastSeek.target;
-      if (!settling) lastSeek = null;
-    }
-    update({ tSec, duration: snapshot.duration ?? readDuration(player) });
+    update({ tSec: currentTime(player), duration: snapshot.duration ?? readDuration(player) });
   }
 
   // Polls only while watched: every 250 ms while playing, every second otherwise.
@@ -157,7 +162,8 @@ export function createPlayerTimeStore(
     },
     getSnapshot: () => snapshot,
     getServerSnapshot: () => INITIAL_SNAPSHOT,
-    getTime: () => (player ? Math.max(0, player.getCurrentTime()) : snapshot.tSec),
+    // Heartbeats and the composer read this, so it honours a fresh seek too.
+    getTime: () => (player ? currentTime(player) : snapshot.tSec),
     seek(seconds) {
       const target = Math.max(0, seconds);
       if (player) player.seekTo(target, true);

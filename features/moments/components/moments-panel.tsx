@@ -257,7 +257,16 @@ function MomentRow({
   );
 }
 
-export function MomentsPanel({ moments, store }: { moments: RoomMoments; store: PlayerTimeStore }) {
+export function MomentsPanel({
+  moments,
+  store,
+  onComposerOpen,
+}: {
+  moments: RoomMoments;
+  store: PlayerTimeStore;
+  // The room shows the Doubts tab when the composer opens (e.g. D pressed on the chat tab).
+  onComposerOpen?: () => void;
+}) {
   const { items, status, loaded, loadError, notice, clearNotice, reload } = moments;
   const now = usePlayer(store, (s) => Math.floor(s.tSec));
   const [composerAt, setComposerAt] = useState<number | null>(null);
@@ -266,6 +275,7 @@ export function MomentsPanel({ moments, store }: { moments: RoomMoments; store: 
   // The time is captured when the composer opens, not when the doubt is posted.
   function openComposer() {
     setComposerAt(Math.floor(store.getTime()));
+    onComposerOpen?.();
   }
 
   function closeComposer() {
@@ -291,11 +301,12 @@ export function MomentsPanel({ moments, store }: { moments: RoomMoments; store: 
         event.preventDefault();
         // An open composer keeps the second it was opened at.
         setComposerAt((current) => current ?? Math.floor(store.getTime()));
+        onComposerOpen?.();
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [store]);
+  }, [store, onComposerOpen]);
 
   useEffect(() => {
     if (!notice) return;

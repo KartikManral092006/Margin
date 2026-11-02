@@ -80,6 +80,8 @@ export function useRoomMoments(lectureId: string, store: PlayerTimeStore) {
   const [loaded, setLoaded] = useState(false);
   const [markers, setMarkers] = useState<Markers | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // The room's Nexconn group, once /chat has set it up (room chat uses it too).
+  const [chatChannelId, setChatChannelId] = useState<string | null>(null);
   // The live handler runs outside React's render, so it reads the latest items from a ref.
   const itemsRef = useRef(state.items);
   useEffect(() => {
@@ -190,6 +192,7 @@ export function useRoomMoments(lectureId: string, store: PlayerTimeStore) {
         }
         if (body?.chat !== "ok" || !body.channelId) throw new Error("no chat");
         channelId = body.channelId;
+        if (!cancelled) setChatChannelId(body.channelId);
         await startNexconn({ withChatUI: false });
         if (!cancelled) setStatus("live");
       } catch {
@@ -329,6 +332,7 @@ export function useRoomMoments(lectureId: string, store: PlayerTimeStore) {
   return {
     items: state.items,
     status,
+    chatChannelId,
     loaded,
     loadError,
     markers,

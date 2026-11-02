@@ -4,14 +4,15 @@ Read this first at the start of every session. Update it at the end of every day
 
 ## Status
 
-| Day | Date      | Work         | Status                                                            |
-| --- | --------- | ------------ | ----------------------------------------------------------------- |
-| 1   | Sun Nov 1 | Scaffold     | Done locally; CI pending first push                               |
-| 2   | Mon Nov 2 | Nexconn test | Go: G0, G2, G3, G5 pass, G1 likely; G4 and G6 not yet recorded    |
-| 3   | Mon Nov 2 | Auth         | Done locally (built a day early); Google and email need your keys |
-| 4   | Mon Nov 2 | Rooms        | Done (built two days early); review fixes applied                 |
-| 5   | Mon Nov 2 | Moments      | Done (built three days early); live Nexconn delivery 0.8-0.9 s    |
-| 6   | Mon Nov 2 | Threads      | Done (built four days early); jump to 30:00 loads in 130 ms       |
+| Day | Date      | Work         | Status                                                                  |
+| --- | --------- | ------------ | ----------------------------------------------------------------------- |
+| 1   | Sun Nov 1 | Scaffold     | Done locally; CI pending first push                                     |
+| 2   | Mon Nov 2 | Nexconn test | Go: G0, G2, G3, G5 pass, G1 likely; G4 and G6 not yet recorded          |
+| 3   | Mon Nov 2 | Auth         | Done locally (built a day early); Google and email need your keys       |
+| 4   | Mon Nov 2 | Rooms        | Done (built two days early); review fixes applied                       |
+| 5   | Mon Nov 2 | Moments      | Done (built three days early); live Nexconn delivery 0.8-0.9 s          |
+| 6   | Mon Nov 2 | Threads      | Done (built four days early); jump to 30:00 loads in 130 ms             |
+| 7   | Mon Nov 2 | P0           | **P0 reached**: presence, room chat, phone polish, Playwright E2E green |
 
 ## Nexconn plan and remaining risks (updated Nov 2)
 
@@ -188,6 +189,24 @@ Not done:
 1. Subagents stalled all day (three probes hit the 600 s watchdog), so Days 5 and 6 had no independent review. Run one when they work.
 2. Test rooms' Nexconn groups (3) remain in Nexconn (harmless).
 
+## Day 7: presence, room chat, polish, P0 gate (built Nov 2)
+
+Done:
+
+- **Presence** (`features/presence/`): each viewer sends a heartbeat every 10 s and when their 30-second window changes (`POST /api/lectures/[id]/presence`); Redis keeps a per-room sorted set of last-seen times plus a hash of positions, and drops anyone silent for 45 s (keys expire when a room goes quiet). `GET /api/lectures/[id]/presence` is a Server-Sent Events stream: a snapshot every 3 s (only when it changed), a keep-alive comment every 15 s, closed after 10 minutes (EventSource reconnects). Each viewer's snapshot excludes them and carries display names only, never user ids. Closing the tab sends a `sendBeacon` leave. The room shows initials and "Ana, Ravi and 3 others are here · 12 watching this lecture".
+- **Room chat** (`features/chat/`): our own component on the Nexconn SDK (ChatUI doesn't support portrait phones): plain text to the lecture's group from the browser, the last 30 messages from Nexconn history, live messages from the connection, names from `GET /api/lectures/[id]/people` (room members only). Doubts and Room chat are tabs; pressing D on the chat tab switches to Doubts.
+- **DMs moved to Day 10** (decision): the plan pairs them with answerers and the inbox, and ChatUI (the planned DM UI) can't render on phones, so building them now would give a desktop-only feature in a phone milestone. Moved, not dropped.
+- Polish: every main screen reviewed at 375 px from screenshots (landing, sign-in, home empty, confirm page, room with doubts, thread, chat tab, not-found); the markers bar gained a time scale. Loading, empty and error states exist on every room panel.
+- **P0 gate**: Playwright 1.64.1 (`pnpm test:e2e`), using the installed Chrome (no browser download). Its own dev server on port 3100 with `NEXT_DIST_DIR=.next-e2e` (never shares a cache with `pnpm dev`), Nexconn and email off; sign-in links are read from that server's log; E2E accounts (`@e2e.test`) are deleted afterwards. Test: A signs in, pastes a link, opens the room, asks at 0:12 with D; B on a 375 px phone signs in, lands in the same room, sees the doubt pinned to 0:12 with no horizontal scroll, and votes "Me too". Plus a signed-out redirect test. Added to CI with the Redis integration test.
+- Fix: the player's `getTime()` (heartbeats, composer) now honours the 2 s seek settling too; presence followed a jump only after 13 s before, 3.2 s after.
+
+Verified: format, lint, typecheck, 380 unit tests, 16 integration tests (Postgres + Redis), drift 0, **E2E 2/2 passing**, production build and secret scan clean. Live over Nexconn (devalice/devbob identities, no new Nexconn users): each browser shows the other at its moment; when one jumps away the other updates in 3.2 s; a chat message reaches the phone in 0.4-0.7 s with the sender's name, and history loads.
+
+Not done:
+
+1. Subagents still stall (four probes hit the 600 s watchdog), so Days 5-7 have had no independent review. Run one when they work.
+2. Going live takes 15-25 s on this network (slow connections to Nexconn's Singapore API); rooms poll every 5 s meanwhile.
+
 ## Decisions (do not re-litigate without a reason)
 
 - Next 16: route guards go in `proxy.ts` (not `middleware.ts`); `next lint` is gone, use `pnpm lint`.
@@ -214,6 +233,7 @@ Not done:
 - Rooms work from Postgres alone. Nexconn group create and join happen lazily in `POST /api/lectures/[id]/chat`, never on page view or join. A public room's creator is a `member`; `host` is for private class rooms (deferred, with Course/Unit/CourseMembership).
 - With streaming metadata, a page-level `redirect()`/`notFound()` returns HTTP 200 and acts in client JS for normal browsers (curl gets a real 307/404). Redirects that must work without JS live in `proxy.ts`, route handlers or server actions.
 - Dev reload loop (Nov 2): every page reloaded itself continuously. Fixed by deleting `.next` and restoring iCloud-evicted files; don't share `.next` between `pnpm build` and `pnpm dev` runs.
+- Room chat is our own component on the Nexconn SDK; DMs and the inbox land on Day 10 with answerers.
 - Votes and status changes go out as message metadata on the moment's MG:Moment; clients re-read the moment from the API. Live signals never overwrite API data.
 - Room moments are sent by marginbot, never by the author, and clients ignore `MG:Moment` from anyone else. Postgres is the truth; the signal is for speed.
 - The working copy is `~/code/Margin` (outside iCloud). `~/Desktop/Margin` is stale and holds the local `backup-before-rewrite` branch.

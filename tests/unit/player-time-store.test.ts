@@ -110,6 +110,19 @@ describe("createPlayerTimeStore", () => {
     expect(store.getSnapshot().tSec).toBe(12);
   });
 
+  it("getTime also returns the seek target while YouTube catches up", () => {
+    let clock = 0;
+    const store = createPlayerTimeStore(fakeScheduler().scheduler, () => clock);
+    const player = fakePlayer();
+    store.attach(player);
+    player.setTime(15);
+    store.seek(95);
+    player.setTime(15); // stale
+    expect(store.getTime()).toBe(95);
+    clock += 3000;
+    expect(store.getTime()).toBe(15); // settled: trust the player again
+  });
+
   it("reports the duration once YouTube knows it", () => {
     const store = createPlayerTimeStore(fakeScheduler().scheduler);
     expect(store.getSnapshot().duration).toBeNull();
