@@ -73,6 +73,17 @@ jobs:
       - name: Apply migrations
         run: pnpm db:deploy
 
+      # Fails (exit 2) if the migrations and schema.prisma disagree, e.g. a hand-written index
+      # that the next `migrate dev` would drop.
+      - name: Check schema drift
+        run: pnpm prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code
+
+      - name: Integration tests
+        run: pnpm test:int
+        env:
+          CI: "true"
+          TEST_DATABASE_URL: postgresql://margin:margin@localhost:5432/margin
+
       # Build with sentinel secret values, then look for those values in the client bundle.
       # Matching values, not variable names: libraries (e.g. Better Auth's env helper) ship
       # names like AUTH_SECRET in browser code without ever reading a value there.

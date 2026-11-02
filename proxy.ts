@@ -23,5 +23,5 @@ export function proxy(request: NextRequest) {
 
 // Literal values only. Must cover PROTECTED_PREFIXES (tests/unit/proxy.test.ts).
 export const config = {
-  matcher: ["/dev/:path*", "/home/:path*"],
+  matcher: ["/dev/:path*", "/home/:path*", "/lectures/:path*"],
 };

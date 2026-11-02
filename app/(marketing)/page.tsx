@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Suspense } from "react";
+import { PasteError, PasteForm } from "@/features/lectures/components/paste-form";
 
 export default function LandingPage() {
   return (
@@ -15,23 +15,14 @@ export default function LandingPage() {
           that moment, and answers from people who already got it.
         </p>
       </div>
-      <form className="flex flex-col gap-2 sm:flex-row" aria-label="Open a lecture room">
-        <label htmlFor="lecture-url" className="sr-only">
-          YouTube lecture link
-        </label>
-        <Input
-          id="lecture-url"
-          type="url"
-          placeholder="https://www.youtube.com/watch?v=…"
-          disabled
-          className="h-11"
-        />
-        <Button type="submit" size="lg" disabled className="h-11">
-          Open room
-        </Button>
-      </form>
+      <div className="space-y-2">
+        <PasteForm />
+        <Suspense fallback={null}>
+          <PasteError />
+        </Suspense>
+      </div>
       <p className="text-sm text-muted-foreground">
-        Lecture rooms are coming soon.{" "}
+        The same video always opens the same room, so you meet everyone watching it.{" "}
         <Link href="/sign-in" className="font-medium text-foreground underline underline-offset-4">
           Sign in
         </Link>

@@ -1,6 +1,8 @@
 generator client {
-  provider = "prisma-client"
-  output   = "../lib/generated/prisma"
+  provider        = "prisma-client"
+  output          = "../lib/generated/prisma"
+  // Preview since 7.4.0: lets @@unique take `where`. Re-test on any Prisma upgrade.
+  previewFeatures = ["partialIndexes"]
 }
 
 datasource db {
@@ -23,6 +25,9 @@ model User {
   updatedAt     DateTime  @updatedAt
   sessions      Session[]
   accounts      Account[]
+
+  lecturesCreated    Lecture[]
+  lectureMemberships LectureMembership[]
 
   @@map("users")
 }
@@ -72,4 +77,54 @@ model Verification {
 
   @@index([identifier])
   @@map("verifications")
+}
+
+enum Visibility {
+  public
+  private
+}
+
+enum Role {
+  member
+  answerer
+  host
+}
+
+model Lecture {
+  id                  String              @id // 32 letters and digits, like User.id
+  youtubeId           String // case-sensitive; format enforced by the parser
+  title               String // from YouTube oEmbed, never from the client
+  channelName         String
+  durationSec         Int? // unknown until a trusted source exists
+  metaFetchedAt       DateTime            @default(now()) // YouTube policy: refresh within 30 days
+  nexconnChannelId    String              @unique
+  nexconnGroupReadyAt DateTime? // set once the Nexconn group exists
+  visibility          Visibility          @default(public)
+  memberCount         Int                 @default(0) // changed only in the join transaction
+  createdById         String?
+  createdBy           User?               @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  memberships         LectureMembership[]
+
+  // Never findUnique/upsert/update/delete by youtubeId: Prisma drops the predicate and can
+  // return a private row. Use findFirst({ where: { youtubeId, visibility: "public" } }).
+  @@unique([youtubeId], map: "lectures_public_youtubeId_key", where: { visibility: "public" })
+  @@index([visibility, memberCount(sort: Desc), createdAt(sort: Desc)])
+  @@index([visibility, createdAt(sort: Desc)])
+  @@map("lectures")
+}
+
+model LectureMembership {
+  lectureId       String
+  userId          String
+  role            Role      @default(member)
+  joinedAt        DateTime  @default(now())
+  nexconnJoinedAt DateTime? // set once the user is in the Nexconn group
+  lecture         Lecture   @relation(fields: [lectureId], references: [id], onDelete: Cascade)
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([lectureId, userId])
+  @@index([userId, joinedAt(sort: Desc)])
+  @@map("lecture_memberships")
 }

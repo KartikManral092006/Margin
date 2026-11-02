@@ -9,6 +9,7 @@ Read this first at the start of every session. Update it at the end of every day
 | 1   | Sun Nov 1 | Scaffold     | Done locally; CI pending first push                               |
 | 2   | Mon Nov 2 | Nexconn test | Go: G0, G2, G3, G5 pass, G1 likely; G4 and G6 not yet recorded    |
 | 3   | Mon Nov 2 | Auth         | Done locally (built a day early); Google and email need your keys |
+| 4   | Mon Nov 2 | Rooms        | Done (built two days early); review findings pending              |
 
 ## Nexconn plan and remaining risks (updated Nov 2)
 
@@ -127,6 +128,28 @@ Not done (needs you):
 2. **Email**: Resend account (Free: 100/day, 3,000/month). Resend only delivers to your own address until you verify a domain you own, e.g. a free one from the GitHub Student Developer Pack, with a subdomain such as `mail.<domain>`. Then set `EMAIL_API_KEY` and `EMAIL_FROM=login@mail.<domain>`. Start this early; DNS takes time.
 3. Test Google sign-in and Google ↔ magic-link sign-in on the same email (account linking) once keys exist.
 
+## Day 4: rooms (built Nov 2)
+
+Done:
+
+- Migration `0003_rooms`: `lectures` and `lecture_memberships`, enums `Visibility` and `Role`. One public room per video through a **partial unique index declared in the schema** (`previewFeatures = ["partialIndexes"]`, `@@unique([youtubeId], where: { visibility: "public" })`). `memberCount` changes only in the join transaction. `durationSec` stays null (no trusted source yet). `metaFetchedAt` records when the title was fetched.
+- `features/lectures/shared/youtube.ts`: URL parser (exact host list, 11-character case-sensitive ID, `t=`/`start=` in 90, 90s, 1m30s, 1h2m3s forms), 64-case test table.
+- `features/lectures/server/oembed.ts`: title and channel from YouTube oEmbed (no key), fixed endpoint, canonical URL built from the parsed ID, 4 s timeout, 64 KB cap, errors mapped to `video_not_found` / `video_unavailable` / `youtube_unavailable`; cached in Redis (1 day, misses 10 min).
+- `features/lectures/server/lectures.ts`: race-safe `findOrCreatePublicLecture` (P2002 on the partial index, read the winner), `joinLecture`, `listPublicLectures` (recent/popular, escaped search), `getLectureForViewer` (404 for missing or non-public).
+- Routes: `GET/POST /api/lectures`, `POST /api/lectures/[id]/join` (Postgres only), `POST /api/lectures/[id]/chat` (lazy Nexconn: token, group create with marginbot as owner, join; idempotent; 503 `chat_unavailable` on failure; not called by any UI yet), `GET /open` (paste target; real 307s; sends signed-out users through sign-in).
+- Pages: landing and `/home` paste form (works without JS), `/home` recent and popular lists, `/lectures/new` (first paster confirms; server action creates), `/lectures/[id]` (player, clock, member count, copy link, join, player error states), `app/not-found.tsx`.
+- `features/player/`: IFrame API loader, `useYouTubePlayer` (nocookie host), time store on `useSyncExternalStore` (polls every 250 ms only while playing; `getTime`, `seek`, `setRate` in 0.25 steps) and `useRoom()` for Days 5-8.
+- Limits: 20 new rooms per user per day, 500 in total; Nexconn group creation 200 per day, **fail-closed** if Redis is down.
+- CI: schema drift check (`prisma migrate diff --exit-code`) and the Postgres integration test (`pnpm test:int`).
+
+Verified: format, lint, typecheck, 278 unit tests, integration test (20 concurrent pastes give 1 room; concurrent joins keep `memberCount` exact; private rows ignored), drift check 0. Live with Nexconn and email disabled: signed-out paste goes through sign-in and back; the first paster sees the oEmbed title and creates the room; the second account pasting the `youtu.be` form lands in the same room (2 members); two accounts creating a new room at the same moment get the same room (one 201, one 200); join idempotent; chat 503 `nexconn_not_configured`; bad hosts, private rooms, unknown videos rejected; 0 Nexconn calls. Headless Chrome at 375 px: player 375x211, no horizontal scroll, nocookie embed honours `t=`.
+
+Not done:
+
+1. Independent review (3 reviewers + skeptics) was still running at commit time; confirmed fixes follow in a separate commit.
+2. One live Nexconn check of `/chat` (1 group create, 2 joins, 2 extra registered users, no MAU) before Day 5. Needs your OK.
+3. YouTube Data API key for the Made-for-Kids check (YouTube developer policy), duration and privacy status. Needs your decision before launch; the 30-day title refresh job also lands before launch.
+
 ## Decisions (do not re-litigate without a reason)
 
 - Next 16: route guards go in `proxy.ts` (not `middleware.ts`); `next lint` is gone, use `pnpm lint`.
@@ -139,7 +162,7 @@ Not done (needs you):
 - Hosting must be a long-running container (SSE presence and Redis need open connections). No serverless.
 - Watch-party sync uses a server clock offset (`GET /api/time`, NTP-style), never raw `Date.now()` across machines.
 - YouTube playback rate only takes 0.25 steps; drift correction uses 1.25× / 0.75× for a computed duration.
-- Schema fixes to apply when the tables land: `Moment.pinnedAt/pinnedBy`; separate `LectureMembership` and `CourseMembership`; partial unique indexes (public `youtubeId`, one active party) and the HNSW index as raw-SQL migrations; vote count updated in the same transaction as the vote.
+- Schema fixes to apply when the tables land: `Moment.pinnedAt/pinnedBy`; separate `LectureMembership` and `CourseMembership`; partial unique indexes through Prisma's native `partialIndexes` preview feature (a hand-written SQL index gets dropped by the next `migrate dev`; test the HNSW index the same way before Day 11); vote count updated in the same transaction as the vote.
 - Embedding model must be chosen before Day 11 (it fixes the `vector(N)` size).
 - Auth is Better Auth (see Day 3). Env names stay `AUTH_*`; never set `BETTER_AUTH_SECRET` or `BETTER_AUTH_URL` (Better Auth reads them as fallbacks).
 - User IDs are 32 letters and digits, set in `user.create.before`, and `nexconnUserId = id` in the same INSERT. Registration with Nexconn happens on the first token request, not at sign-up: sign-in never depends on Nexconn, and only people who open chat count toward Nexconn MAU. ("Nexconn user created on first sign-in" in the plan now means "ID reserved at sign-up, registered on first connect".)
@@ -148,6 +171,11 @@ Not done (needs you):
 - Every redirect target from user input goes through `safeCallbackPath` (checked after URL parsing).
 - Magic links land on `/sign-in/confirm`; the verify endpoint only accepts same-origin navigations.
 - Before launch: set `AUTH_IP_HEADER` (or `AUTH_TRUSTED_PROXIES`) for the chosen host, otherwise per-IP limits put all users in one bucket. Check it on staging with a forged `X-Forwarded-For`.
+- Sign-up is open to everyone (owner, Nov 2).
+- Never `findUnique`/`upsert` a lecture by `youtubeId`: the unique index is partial and Prisma drops the predicate. Use `findFirst` with `visibility: "public"`.
+- Rooms work from Postgres alone. Nexconn group create and join happen lazily in `POST /api/lectures/[id]/chat`, never on page view or join. A public room's creator is a `member`; `host` is for private class rooms (deferred, with Course/Unit/CourseMembership).
+- With streaming metadata, a page-level `redirect()`/`notFound()` returns HTTP 200 and acts in client JS for normal browsers (curl gets a real 307/404). Redirects that must work without JS live in `proxy.ts`, route handlers or server actions.
+- Dev reload loop (Nov 2): every page reloaded itself continuously. Fixed by deleting `.next` and restoring iCloud-evicted files; don't share `.next` between `pnpm build` and `pnpm dev` runs.
 - pnpm's 1-day `minimumReleaseAge` stays on; pin an older version instead of adding exclusions.
 - The project lives in `~/Desktop`, which is synced to iCloud with "Optimize Mac Storage". On Nov 2 iCloud had evicted ~25,000 files in `node_modules` and 118 source/`.git` files, so reads hung (`prisma` never started). Fix used: `brctl download` for source files, delete and reinstall `node_modules`. Long-term fix: move the repo out of Desktop/Documents (e.g. `~/code/margin`).
 

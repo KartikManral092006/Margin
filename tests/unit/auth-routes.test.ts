@@ -14,6 +14,7 @@ describe("safeCallbackPath", () => {
     ["/lectures/abc", "/lectures/abc"],
     ["/%0a", "/%0a"],
     ["/home/../home/x", "/home/x"],
+    ["/open?v=dQw4w9WgXcQ&t=90", "/open?v=dQw4w9WgXcQ&t=90"],
   ])("keeps the same-origin path %s", (raw, expected) => {
     expect(safeCallbackPath(raw)).toBe(expected);
   });

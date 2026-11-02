@@ -27,6 +27,12 @@ describe("proxy matcher", () => {
     expect(matches("/sign-in")).toBe(false);
     expect(matches("/")).toBe(false);
   });
+
+  it("leaves the paste entry point and the lecture API to their own checks", () => {
+    expect(matches("/open")).toBe(false);
+    expect(matches("/api/lectures")).toBe(false);
+    expect(matches("/lecturesx")).toBe(false);
+  });
 });
 
 describe("proxy", () => {
@@ -34,6 +40,13 @@ describe("proxy", () => {
     const response = proxy(new NextRequest(`${base}/home?tab=1`));
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(`${base}/sign-in?callbackURL=%2Fhome%3Ftab%3D1`);
+  });
+
+  it("sends a signed-out visitor of a room back to it after sign-in", () => {
+    const response = proxy(new NextRequest(`${base}/lectures/${"a".repeat(32)}?t=90`));
+    expect(response.headers.get("location")).toBe(
+      `${base}/sign-in?callbackURL=%2Flectures%2F${"a".repeat(32)}%3Ft%3D90`,
+    );
   });
 
   it.each(["better-auth.session_token", "__Secure-better-auth.session_token"])(

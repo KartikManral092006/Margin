@@ -25,6 +25,17 @@ describe("createRateLimiter", () => {
     expect(evalFn).toHaveBeenCalledWith(RATE_LIMIT_SCRIPT, 1, "rl:ml:x", 60);
   });
 
+  it("fails closed when asked to, for limits that guard an external quota", async () => {
+    const consume = createRateLimiter(
+      async () => {
+        throw new Error("ECONNREFUSED");
+      },
+      () => {},
+      { failClosed: true },
+    );
+    await expect(consume("k", rule)).resolves.toEqual({ allowed: false, retryAfter: 60 });
+  });
+
   it("fails open and reports the error when Redis is down", async () => {
     const onError = vi.fn();
     const consume = createRateLimiter(async () => {

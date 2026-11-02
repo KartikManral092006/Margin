@@ -4,7 +4,7 @@ import { isValidCustomType } from "@/features/nexconn/shared/messages";
 
 const BUILT_IN_PREFIX = "RC:";
 
-function isCode(error: unknown, code: number): boolean {
+export function isCode(error: unknown, code: number): boolean {
   return error instanceof NexconnApiError && error.code === code;
 }
 

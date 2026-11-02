@@ -15,7 +15,12 @@ export function toDecision(count: number, ttl: number, rule: RateRule): RateDeci
 }
 
 // Fails open when Redis is unavailable so sign-in keeps working; onError lets the caller log it.
-export function createRateLimiter(evalFn: EvalFn, onError: (error: unknown) => void = () => {}) {
+// failClosed is for limits that protect a hard external quota (e.g. Nexconn groups).
+export function createRateLimiter(
+  evalFn: EvalFn,
+  onError: (error: unknown) => void = () => {},
+  options: { failClosed?: boolean } = {},
+) {
   return async function consume(key: string, rule: RateRule): Promise<RateDecision> {
     try {
       const [count, ttl] = (await evalFn(RATE_LIMIT_SCRIPT, 1, `rl:${key}`, rule.window)) as [
@@ -25,7 +30,9 @@ export function createRateLimiter(evalFn: EvalFn, onError: (error: unknown) => v
       return toDecision(count, ttl, rule);
     } catch (error) {
       onError(error);
-      return { allowed: true, retryAfter: null };
+      return options.failClosed
+        ? { allowed: false, retryAfter: 60 }
+        : { allowed: true, retryAfter: null };
     }
   };
 }

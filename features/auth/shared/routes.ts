@@ -2,7 +2,7 @@ export const SIGN_IN_PATH = "/sign-in";
 export const DEFAULT_AFTER_SIGN_IN = "/home";
 
 // Keep in sync with the matcher in proxy.ts (tests/unit/proxy.test.ts enforces it).
-export const PROTECTED_PREFIXES = ["/home"] as const;
+export const PROTECTED_PREFIXES = ["/home", "/lectures"] as const;
 
 const PARSE_BASE = "http://margin.invalid";
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
